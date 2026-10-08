@@ -264,7 +264,7 @@ def mcp_cmd(
     from devorch.mcp_server import build_server
 
     plane = ControlPlane.from_project(path, mock=mock, skip_tests=no_tests)
-    typer.echo(f"DevOrch MCP server — {plane.root} (providers: {', '.join(plane.providers.names()) or '없음'})", err=True)
+    typer.echo(f"DevOrch MCP server - {plane.root} (providers: {', '.join(plane.providers.names()) or '없음'})", err=True)
     build_server(plane).run("stdio")
 
 
