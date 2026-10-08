@@ -134,6 +134,14 @@ class ModeSummary:
     output_tokens: int = 0
     trap_runs_completed: int = 0  # completed runs of clean cases that declare a trap
     trap_alarms: int = 0
+    defects_total: int = 0  # distinct seeded defects (repeats collapsed)
+    defects_detected: int = 0  # found in a majority of that defect's repeats
+    defects_unstable: int = 0  # found in some but not all repeats
+
+    @property
+    def defect_ci(self) -> tuple[float, float]:
+        """Wilson interval over distinct defects — the honest unit; ``detection_ci`` treats every repeat as independent."""
+        return wilson(self.defects_detected, self.defects_total)
 
     @property
     def trap_rate(self) -> float:
@@ -174,6 +182,7 @@ def summarize(cases: list[Case], results: list[RunResult], mode: str) -> ModeSum
             c[0] += hit
             c[1] += 1
     clean_done = [r for r in rs if by_id[r.case_id].clean and r.completed]
+    outcomes = defect_outcomes(cases, results, mode)
     return ModeSummary(
         mode=mode,
         defect_runs=defect_runs,
@@ -191,30 +200,46 @@ def summarize(cases: list[Case], results: list[RunResult], mode: str) -> ModeSum
         output_tokens=sum(r.output_tokens for r in rs),
         trap_runs_completed=sum(bool(by_id[r.case_id].traps) for r in clean_done),
         trap_alarms=sum(r.trap_alarm for r in clean_done),
+        defects_total=len(outcomes),
+        defects_detected=sum(majority_detected(h, n) for h, n in outcomes.values()),
+        defects_unstable=sum(0 < h < n for h, n in outcomes.values()),
     )
 
 
-def paired_comparison(cases: list[Case], results: list[RunResult], mode_a: str, mode_b: str) -> dict:
-    """Per (case, defect, repeat): did A / B detect it? Exact sign test on the discordant pairs."""
+def defect_outcomes(cases: list[Case], results: list[RunResult], mode: str) -> dict[tuple[str, str], tuple[int, int]]:
+    """(case id, defect id) -> (repeats that detected it, repeats run). Incomplete runs count as runs, not detections."""
     by_id = {c.id: c for c in cases}
-    idx = {(r.mode, r.case_id, r.repeat): r for r in results}
+    out: dict[tuple[str, str], list[int]] = {}
+    for r in results:
+        if r.mode != mode:
+            continue
+        for d in by_id[r.case_id].defects:
+            o = out.setdefault((r.case_id, d.id), [0, 0])
+            o[0] += d.id in r.detected
+            o[1] += 1
+    return {k: (v[0], v[1]) for k, v in out.items()}
+
+
+def majority_detected(hits: int, runs: int) -> bool:
+    """Detected if found in MORE than half the repeats (a tie is not a detection)."""
+    return hits * 2 > runs
+
+
+def paired_comparison(cases: list[Case], results: list[RunResult], mode_a: str, mode_b: str) -> dict:
+    """Per (case, defect) — the repeats of one defect are NOT independent samples, so they are collapsed first
+    (detected = found in a majority of repeats). Exact sign test on the discordant defects."""
+    oa, ob = defect_outcomes(cases, results, mode_a), defect_outcomes(cases, results, mode_b)
     only_a = only_b = both = neither = 0
-    for (mode, cid, rep), ra in idx.items():
-        if mode != mode_a:
-            continue
-        rb = idx.get((mode_b, cid, rep))
-        if rb is None:
-            continue
-        for d in by_id[cid].defects:
-            a, b = d.id in ra.detected, d.id in rb.detected
-            if a and b:
-                both += 1
-            elif a:
-                only_a += 1
-            elif b:
-                only_b += 1
-            else:
-                neither += 1
+    for key in oa.keys() & ob.keys():
+        a, b = majority_detected(*oa[key]), majority_detected(*ob[key])
+        if a and b:
+            both += 1
+        elif a:
+            only_a += 1
+        elif b:
+            only_b += 1
+        else:
+            neither += 1
     return {
         "a": mode_a, "b": mode_b, "only_a": only_a, "only_b": only_b, "both": both, "neither": neither,
         "p_value": sign_test(only_a, only_b),

@@ -13,7 +13,7 @@ from devorch.bench.cases import load_cases, validate_cases
 from devorch.bench.mock import heuristic_provider
 from devorch.bench.metrics import summarize
 from devorch.bench.report import render_report
-from devorch.bench.runner import MODES, expected_calls, review_steps, run_benchmark
+from devorch.bench.runner import MODES, expected_calls, is_valid_mode, review_steps, run_benchmark
 from devorch.config import devorch_dir, load_config, load_policy
 from devorch.core.orchestrator.review import budget_preflight
 from devorch.providers.base import ProviderRegistry
@@ -52,7 +52,7 @@ def cases_cmd(cases_dir: Path = typer.Option(None, "--cases-dir", help="케이�
 @bench_app.command("run")
 def run_cmd(
     path: Path = typer.Option(Path("."), "--path", "-p", file_okay=False, help="프로젝트 루트(.devorch 설정 위치)"),
-    mode: str = typer.Option("both", "--mode", help="single | multi | both"),
+    mode: str = typer.Option("both", "--mode", help="single | multi | both | solo:<provider>[:<role>] — 쉼표로 여러 개(예: single,solo:gemini:review)"),
     repeats: int = typer.Option(1, "--repeats", min=1, help="반복 횟수"),
     mock: bool = typer.Option(False, "--mock", help="가짜 리뷰어(하네스 점검 전용 — 실제 성능 아님)"),
     yes: bool = typer.Option(False, "--yes", "-y", help="호출 확인 생략"),
@@ -63,9 +63,9 @@ def run_cmd(
     max_total_usd: float = typer.Option(None, "--max-total-usd", min=0.0001, help="벤치마크 전체 비용 합계 상한(USD). 도달하면 새 케이스를 시작하지 않음. 모든 provider 단가 필요"),
 ) -> None:
     """벤치마크를 실행해 results.json 과 report.md 를 쓴다."""
-    modes = list(MODES) if mode == "both" else [mode]
-    if any(m not in MODES for m in modes):
-        typer.echo("--mode 는 single | multi | both 중 하나여야 합니다.", err=True)
+    modes = list(MODES) if mode == "both" else [m.strip() for m in mode.split(",") if m.strip()]
+    if not modes or any(not is_valid_mode(m) for m in modes) or len(set(modes)) != len(modes):
+        typer.echo("--mode 는 single | multi | both | solo:<claude|openai|gemini>[:<review|security|architecture>] 이거나, 쉼표로 구분한 중복 없는 목록이어야 합니다.", err=True)
         raise typer.Exit(2)
     cases = _load(cases_dir, only)
     try:
@@ -131,6 +131,7 @@ def _summary_dict(s) -> dict:
         "detection_ci": s.detection_ci, "clean_runs_completed": s.clean_runs_completed,
         "false_positives": s.false_positives, "fp_rate": s.fp_rate, "fp_ci": s.fp_ci,
         "trap_runs_completed": s.trap_runs_completed, "trap_alarms": s.trap_alarms, "trap_rate": s.trap_rate, "trap_ci": s.trap_ci,
+        "defects_total": s.defects_total, "defects_detected": s.defects_detected, "defects_unstable": s.defects_unstable, "defect_ci": s.defect_ci,
         "incomplete": s.incomplete, "unmatched": s.unmatched, "cost_usd": s.cost_usd,
         "cost_unknown": s.cost_unknown, "mean_latency_s": s.mean_latency_s,
         "input_tokens": s.input_tokens, "output_tokens": s.output_tokens,

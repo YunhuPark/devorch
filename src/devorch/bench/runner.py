@@ -18,17 +18,36 @@ from devorch.models import ImpactReport, RoutingStep
 from devorch.providers.base import ProviderRegistry
 
 MODES = ("single", "multi")
+SOLO_PROVIDERS = ("claude", "openai", "gemini")
+SOLO_ROLES = ("review", "security", "architecture")
+
+
+def _parse_solo(mode: str) -> tuple[str, str] | None:
+    """``solo:<provider>[:<role>]`` -> (provider, role), or None if ``mode`` isn't a valid solo mode."""
+    parts = mode.split(":")
+    if parts[0] != "solo" or not 2 <= len(parts) <= 3:
+        return None
+    provider, role = parts[1], parts[2] if len(parts) == 3 else "review"
+    return (provider, role) if provider in SOLO_PROVIDERS and role in SOLO_ROLES else None
+
+
+def is_valid_mode(mode: str) -> bool:
+    return mode in MODES or _parse_solo(mode) is not None
 
 
 def review_steps(policy: Policy, mode: str) -> list[RoutingStep]:
-    """single: one general reviewer. multi: the policy's HIGH-level specialist reviewers + a general one."""
+    """single: one general reviewer (the policy's default). multi: the policy's HIGH-level specialist reviewers + a
+    general one. solo:<provider>[:<role>]: exactly one reviewer, so a provider and a prompt role can be compared
+    on their own (role defaults to "review")."""
     if mode == "single":
         roles = {"review": policy.default_roles.get("review", "openai")}
     elif mode == "multi":
         roles = {r: p for r, p in policy.rules["high"].items() if r != "implementation"}
         roles.setdefault("review", policy.default_roles.get("review", "openai"))
+    elif (solo := _parse_solo(mode)) is not None:
+        roles = {solo[1]: solo[0]}
     else:
-        raise ValueError(f"unknown mode {mode!r} (choose from {', '.join(MODES)})")
+        raise ValueError(f"unknown mode {mode!r} (choose from {', '.join(MODES)} or solo:<{'|'.join(SOLO_PROVIDERS)}>[:<{'|'.join(SOLO_ROLES)}>])")
     return [RoutingStep(role=r, provider=p, purpose=r) for r, p in roles.items()]
 
 

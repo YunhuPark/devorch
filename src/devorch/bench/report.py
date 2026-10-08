@@ -15,6 +15,10 @@ MOCK_BANNER = (
 
 LIMITATIONS = [
     "케이스 수가 적습니다(신뢰구간이 넓음). 구간이 겹치면 차이가 있다고 말할 수 없습니다.",
+    "탐지(실행)의 신뢰구간은 반복 실행을 서로 독립인 표본으로 가정해 실제보다 좁습니다. 반복은 같은 케이스를 다시 돌린 것이라 독립이 아닙니다. "
+    "판단은 '탐지(결함 단위)'와 쌍체 비교(결함 단위)로 하세요. 반복은 같은 결함의 안정성(비결정성)을 볼 때만 의미가 있습니다.",
+    "모드 간 차이에는 모델과 프롬프트 역할이 섞여 있을 수 있습니다(예: 아키텍처 프롬프트를 받은 리뷰어와 일반 리뷰 프롬프트를 받은 리뷰어). "
+    "분리하려면 solo:<provider>[:<role>] 모드로 한 리뷰어씩 따로 돌리세요.",
     "탐지 판정은 정규식 매칭입니다. 올바르게 지적했지만 표현이 달라 놓친 경우(과소)나, 우연히 맞은 경우(과대)가 있을 수 있습니다.",
     "'매칭 안 된 지적'은 오탐이 아니라 *확인 필요* 항목입니다(유효한 추가 지적일 수 있음). 오탐률은 대조군에서만 측정합니다.",
     "오탐률(엄격) = 대조군에서 MEDIUM 이상 지적이 하나라도 있으면 오탐(정당한 사소한 지적도 포함). "
@@ -89,13 +93,15 @@ def render_report(cases: list[Case], results: list[RunResult], modes: list[str],
         "",
         "## 요약 (95% Wilson 신뢰구간)",
         "",
-        "| 모드 | 탐지율 | 오탐률(엄격) | 오탐률(함정) | 불완전 리뷰 | 매칭 안 된 지적 | 토큰(입력/출력) | 비용 | 평균 지연(s) |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| 모드 | 탐지(실행) | 탐지(결함 단위) | 오탐률(엄격) | 오탐률(함정) | 불완전 리뷰 | 매칭 안 된 지적 | 토큰(입력/출력) | 비용 | 평균 지연(s) |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     sums = {m: summarize(cases, results, m) for m in modes}
     for m, s in sums.items():
+        unstable = f", 불안정 {s.defects_unstable}" if s.defects_unstable else ""
         lines.append(
             f"| {m} | {s.detected}/{s.defect_runs} = {_pct(s.detection_rate)} {_ci(s.detection_ci)} "
+            f"| {s.defects_detected}/{s.defects_total} {_ci(s.defect_ci)}{unstable} "
             f"| {s.false_positives}/{s.clean_runs_completed} = {_pct(s.fp_rate)} {_ci(s.fp_ci)} "
             f"| {_trap(s)} "
             f"| {s.incomplete}/{s.runs} | {s.unmatched} | {s.input_tokens:,} / {s.output_tokens:,} | {_cost(s)} | {s.mean_latency_s:.2f} |"
@@ -109,15 +115,15 @@ def render_report(cases: list[Case], results: list[RunResult], modes: list[str],
                 d, t = sums[m].by_category.get(c, (0, 0))
                 cells.append(f"{d}/{t}")
             lines.append(f"| {c} | " + " | ".join(cells) + " |")
-    if len(modes) == 2:
-        p = paired_comparison(cases, results, modes[0], modes[1])
-        lines += [
-            "",
-            "## 쌍체 비교 (정확 부호검정)",
-            "",
-            f"- {p['a']}만 탐지 {p['only_a']}, {p['b']}만 탐지 {p['only_b']}, 둘 다 {p['both']}, 둘 다 못함 {p['neither']}",
-            f"- p = {p['p_value']:.3f} " + ("(차이가 있다고 보기 어려움: p ≥ 0.05)" if p["p_value"] >= 0.05 else "(p < 0.05)"),
-        ]
+    if len(modes) >= 2:
+        lines += ["", f"## 쌍체 비교 (결함 단위, 정확 부호검정) — 기준: {modes[0]}", ""]
+        for other in modes[1:]:
+            p = paired_comparison(cases, results, modes[0], other)
+            lines += [
+                f"- **{other}**: {p['a']}만 탐지 {p['only_a']}, {p['b']}만 탐지 {p['only_b']}, 둘 다 {p['both']}, 둘 다 못함 {p['neither']} "
+                f"→ p = {p['p_value']:.3f} " + ("(차이가 있다고 보기 어려움: p ≥ 0.05)" if p["p_value"] >= 0.05 else "(p < 0.05)"),
+            ]
+        lines += ["- 같은 결함의 반복 실행은 하나로 합쳐 셉니다(과반의 반복에서 탐지돼야 탐지)."]
     by_id = {c.id: c for c in cases}
     lines += ["", "## 케이스별 결과", "", "| 케이스 | 모드 | 결과 |", "|---|---|---|"]
     for r in sorted(results, key=lambda r: (r.case_id, r.mode, r.repeat)):
