@@ -67,15 +67,26 @@ async def run_benchmark(
     repeats: int = 1,
     concurrency: int = 4,
     on_progress: Callable[[int, int], None] | None = None,
+    max_total_cost_usd: float | None = None,
 ) -> list[RunResult]:
+    """Run every (case, mode, repeat). With ``max_total_cost_usd``, no new case is started once the summed cost
+    reaches it (the skipped cases are reported as incomplete). Cases already running still finish, so the total can
+    exceed the cap by up to ``concurrency`` cases' worth. The policy's per-case cap can't bound a whole run: a
+    case's reviewers start together."""
     sem = asyncio.Semaphore(max(1, concurrency))
     jobs = [(c, m, r) for m in modes for c in cases for r in range(repeats)]
     done = 0
+    spent = 0.0
 
     async def one(c: Case, m: str, r: int) -> RunResult:
-        nonlocal done
+        nonlocal done, spent
         async with sem:
-            res = await run_case(c, m, r, policy, providers)
+            if max_total_cost_usd is not None and spent >= max_total_cost_usd:
+                note = f"[{c.id}] 벤치마크 비용 합계 상한 도달: ${spent:.4f} >= ${max_total_cost_usd:.4f} — 호출하지 않음"
+                res = score_run(c, m, r, [], False, notes=[note])
+            else:
+                res = await run_case(c, m, r, policy, providers)
+                spent += res.cost_usd
         done += 1
         if on_progress:
             on_progress(done, len(jobs))

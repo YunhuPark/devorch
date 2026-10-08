@@ -60,6 +60,7 @@ def run_cmd(
     cases_dir: Path = typer.Option(None, "--cases-dir"),
     out: Path = typer.Option(None, "--out", help="결과 디렉터리 (기본: .devorch/bench/<시각>)"),
     claude_only: bool = typer.Option(False, "--claude-only", help="모든 리뷰어 역할을 claude 로 배정 (키 1개만 필요. 다른 회사 모델의 교차 검증은 빠짐)"),
+    max_total_usd: float = typer.Option(None, "--max-total-usd", min=0.0001, help="벤치마크 전체 비용 합계 상한(USD). 도달하면 새 케이스를 시작하지 않음. 모든 provider 단가 필요"),
 ) -> None:
     """벤치마크를 실행해 results.json 과 report.md 를 쓴다."""
     modes = list(MODES) if mode == "both" else [mode]
@@ -93,17 +94,22 @@ def run_cmd(
             for n in missing:
                 typer.echo(f"  - {n}: {skipped.get(n, '알 수 없음')}", err=True)
             raise typer.Exit(2)
-        if (problem := budget_preflight(registry, needed, policy.limits.max_cost_usd)) is not None:
-            typer.echo(f"오류: {problem}", err=True)
-            raise typer.Exit(2)
+        for cap in (policy.limits.max_cost_usd, max_total_usd):
+            if (problem := budget_preflight(registry, needed, cap)) is not None:
+                typer.echo(f"오류: {problem}", err=True)
+                raise typer.Exit(2)
         calls = expected_calls(cases, policy, modes, repeats)
         typer.echo(f"실제 LLM API를 총 {calls}회 호출합니다 (provider: {', '.join(needed)}). 비용은 호출 후에야 알 수 있고, 단가를 설정하지 않으면 unknown 입니다.")
         if policy.limits.max_cost_usd is not None:
-            typer.echo(f"케이스(실행)당 비용 상한: ${policy.limits.max_cost_usd} — 전체 합계 상한이 아닙니다.")
+            typer.echo(f"케이스(실행)당 비용 상한: ${policy.limits.max_cost_usd} — 한 케이스의 리뷰어는 동시에 출발하므로 전체 지출을 막지는 못합니다.")
+        if max_total_usd is not None:
+            typer.echo(f"벤치마크 전체 비용 합계 상한: ${max_total_usd} — 도달하면 새 케이스를 시작하지 않습니다(진행 중인 케이스는 끝나므로 조금 넘을 수 있음).")
+        else:
+            typer.echo("전체 비용 합계 상한이 없습니다. --max-total-usd 로 정할 수 있습니다.")
         if not yes and not typer.confirm("진행할까요?"):
             raise typer.Exit(1)
 
-    results = asyncio.run(run_benchmark(cases, policy, registry, modes, repeats))
+    results = asyncio.run(run_benchmark(cases, policy, registry, modes, repeats, max_total_cost_usd=max_total_usd))
 
     out_dir = out or (devorch_dir(path) / "bench" / datetime.now().strftime("%Y%m%d-%H%M%S"))
     out_dir.mkdir(parents=True, exist_ok=True)

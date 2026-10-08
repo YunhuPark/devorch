@@ -233,6 +233,50 @@ async def test_benchmark_results_and_report_carry_tokens(tmp_path):
     assert "토큰(입력/출력)" in text and "300 / 150" in text
 
 
+# ---- benchmark: a TOTAL cap across all cases (the per-case cap can't bound a whole run) ---------------
+async def test_benchmark_total_cap_stops_starting_new_cases_and_reports_them_incomplete():
+    from devorch.bench.runner import run_benchmark
+
+    cases = load_cases()[:5]
+    openai = FakeProvider("openai", ["[]"], cost=0.04)
+    results = await run_benchmark(cases, Policy(), registry(openai=openai), ["single"], concurrency=1, max_total_cost_usd=0.10)
+    ran = [r for r in results if r.completed]
+    skipped = [r for r in results if not r.completed]
+    assert len(ran) == 3 and len(skipped) == 2  # 0.04 -> 0.08 -> 0.12 (>= cap), then nothing more starts
+    assert len(openai.calls) == 3  # skipped cases made no LLM call at all
+    assert all("합계 상한" in n for r in skipped for n in r.notes)
+    assert sum(r.cost_usd for r in results) == pytest.approx(0.12)
+
+
+async def test_benchmark_without_total_cap_runs_everything():
+    from devorch.bench.runner import run_benchmark
+
+    cases = load_cases()[:4]
+    openai = FakeProvider("openai", ["[]"], cost=5.0)
+    results = await run_benchmark(cases, Policy(), registry(openai=openai), ["single"], concurrency=1)
+    assert all(r.completed for r in results) and len(openai.calls) == 4
+
+
+def test_bench_cli_refuses_a_total_cap_with_unpriced_providers_before_any_call(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from devorch.cli.main import app
+
+    openai = FakeProvider("openai", ["[]"], priced=False)
+    monkeypatch.setattr("devorch.cli.bench_cmd.build_registry", lambda cfg: (registry(openai=openai), {}))
+    r = CliRunner().invoke(app, ["bench", "run", "-p", str(tmp_path), "--mode", "single", "--max-total-usd", "1", "--yes"])
+    assert r.exit_code == 2 and "단가" in r.output and openai.calls == []
+
+
+def test_bench_cli_rejects_a_non_positive_total_cap(tmp_path):
+    from typer.testing import CliRunner
+
+    from devorch.cli.main import app
+
+    r = CliRunner().invoke(app, ["bench", "run", "-p", str(tmp_path), "--mock", "--max-total-usd", "0"])
+    assert r.exit_code != 0
+
+
 # ---- benchmark report: failures must be visible ---------------------------------------------------
 CASES = load_cases()[:2]
 CREDIT_ERR = (
