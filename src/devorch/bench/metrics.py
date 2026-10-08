@@ -68,6 +68,7 @@ class RunResult:
     cost_unknown: bool = False
     latency_s: float = 0.0
     notes: list[str] = field(default_factory=list)
+    models: dict[str, str] = field(default_factory=dict)  # provider -> model id that answered
 
     def to_dict(self) -> dict:
         return {
@@ -81,6 +82,7 @@ class RunResult:
             "cost_usd": self.cost_usd,
             "cost_unknown": self.cost_unknown,
             "latency_s": round(self.latency_s, 3),
+            "models": self.models,
             "notes": self.notes,
             "findings": [f.model_dump(mode="json") for f in self.findings],
         }

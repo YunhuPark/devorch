@@ -41,6 +41,16 @@ class CriticalPolicy(BaseModel):
 class LimitsPolicy(BaseModel):
     max_retries: int = 3
     command_timeout_s: int = 300
+    # Per-task spend cap in USD (null = no cap). Needs prices for every provider in use
+    # (providers.<name>.input_per_mtok / output_per_mtok) — without them the cap can't be enforced, so runs refuse to start.
+    max_cost_usd: float | None = None
+
+    @field_validator("max_cost_usd")
+    @classmethod
+    def _positive_cost(cls, v: float | None) -> float | None:
+        if v is not None and v <= 0:
+            raise ValueError("limits.max_cost_usd must be > 0 (or null for no cap)")
+        return v
 
 
 class Policy(BaseModel):

@@ -18,6 +18,7 @@ from devorch.core.execution.sandbox import load_sandbox, sandbox_status
 from devorch.core.execution.executor import ExecutionError, Executor
 from devorch.core.execution.patch import extract_diff
 from devorch.core.orchestrator.engine import WorkflowEngine, WorkflowRun
+from devorch.core.orchestrator.review import budget_preflight
 from devorch.core.router.model_router import plan_routing
 from devorch.providers.base import ProviderRegistry
 from devorch.providers.factory import build_registry
@@ -197,8 +198,13 @@ def run(
                 typer.echo(f"  - {n}: {skipped.get(n, '알 수 없음')}", err=True)
             typer.echo("`devorch providers` 로 설정 상태를 확인하세요.", err=True)
             raise typer.Exit(2)
+        if (problem := budget_preflight(registry, needed, policy.limits.max_cost_usd)) is not None:
+            typer.echo(f"오류: {problem}", err=True)
+            raise typer.Exit(2)
         typer.echo(f"위험도 {plan.level.value.upper()} — " + ", ".join(f"{s.role}={s.provider}" for s in plan.steps))
         typer.echo(f"실제 LLM API를 호출합니다 (예상 ~${plan.estimated_cost_usd:.2f}, 기본 추정치 · 수정 라운드마다 반복될 수 있음).")
+        if policy.limits.max_cost_usd is not None:
+            typer.echo(f"작업당 비용 상한: ${policy.limits.max_cost_usd} (호출 사이에서 검사 — 병렬로 진행 중인 호출만큼은 넘을 수 있음).")
         if not yes and not typer.confirm("진행할까요?"):
             raise typer.Exit(1)
 

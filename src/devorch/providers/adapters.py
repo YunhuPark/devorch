@@ -23,7 +23,17 @@ def _cost(prices: dict[str, float] | None, in_tok: int, out_tok: int) -> float |
     return round((in_tok * prices["input_per_mtok"] + out_tok * prices["output_per_mtok"]) / 1_000_000, 6)
 
 
-class AnthropicProvider(LLMProvider):
+class _PricedProvider(LLMProvider):
+    """Adapters report cost only when per-million-token prices were configured."""
+
+    prices: dict[str, float] | None
+
+    @property
+    def priced(self) -> bool:
+        return _cost(self.prices, 0, 0) is not None
+
+
+class AnthropicProvider(_PricedProvider):
     def __init__(
         self,
         model: str,
@@ -62,7 +72,7 @@ class AnthropicProvider(LLMProvider):
         )
 
 
-class OpenAIProvider(LLMProvider):
+class OpenAIProvider(_PricedProvider):
     """Uses the Responses API."""
 
     def __init__(
@@ -106,7 +116,7 @@ class OpenAIProvider(LLMProvider):
         )
 
 
-class GeminiProvider(LLMProvider):
+class GeminiProvider(_PricedProvider):
     """Uses ``models.generate_content``.
 
     The SDK also ships an Interactions API; this adapter deliberately sticks to

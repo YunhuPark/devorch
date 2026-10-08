@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 
 from pydantic import BaseModel, Field
 
@@ -28,6 +29,11 @@ class LLMResponse(BaseModel):
 class LLMProvider(ABC):
     name: str
 
+    @property
+    def priced(self) -> bool:
+        """True if ``generate`` reports a cost, i.e. a spend cap can be enforced for this provider."""
+        return True
+
     @abstractmethod
     async def generate(self, request: LLMRequest) -> LLMResponse:
         """Run one request. Must raise on failure (never return partial text silently)."""
@@ -49,3 +55,7 @@ class ProviderRegistry:
 
     def names(self) -> list[str]:
         return sorted(self._providers)
+
+    def unpriced(self, names: Iterable[str]) -> list[str]:
+        """Registered providers among ``names`` whose calls would have unknown cost."""
+        return sorted({n for n in names if n in self._providers and not self._providers[n].priced})

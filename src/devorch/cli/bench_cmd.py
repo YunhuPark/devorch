@@ -15,6 +15,7 @@ from devorch.bench.metrics import summarize
 from devorch.bench.report import render_report
 from devorch.bench.runner import MODES, expected_calls, review_steps, run_benchmark
 from devorch.config import devorch_dir, load_config, load_policy
+from devorch.core.orchestrator.review import budget_preflight
 from devorch.providers.base import ProviderRegistry
 from devorch.providers.factory import build_registry
 
@@ -92,8 +93,13 @@ def run_cmd(
             for n in missing:
                 typer.echo(f"  - {n}: {skipped.get(n, '알 수 없음')}", err=True)
             raise typer.Exit(2)
+        if (problem := budget_preflight(registry, needed, policy.limits.max_cost_usd)) is not None:
+            typer.echo(f"오류: {problem}", err=True)
+            raise typer.Exit(2)
         calls = expected_calls(cases, policy, modes, repeats)
         typer.echo(f"실제 LLM API를 총 {calls}회 호출합니다 (provider: {', '.join(needed)}). 비용은 호출 후에야 알 수 있고, 단가를 설정하지 않으면 unknown 입니다.")
+        if policy.limits.max_cost_usd is not None:
+            typer.echo(f"케이스(실행)당 비용 상한: ${policy.limits.max_cost_usd} — 전체 합계 상한이 아닙니다.")
         if not yes and not typer.confirm("진행할까요?"):
             raise typer.Exit(1)
 

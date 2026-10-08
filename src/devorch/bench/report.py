@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import re
+
 from devorch.bench.cases import Case
 from devorch.bench.metrics import ModeSummary, RunResult, paired_comparison, summarize
+from devorch.security.secret_redactor import redact
 
 MOCK_BANNER = (
     "> ⚠️ **MOCK — harness check only.** 이 결과는 가짜 리뷰어(정규식 규칙)로 만든 것이며 "
@@ -34,13 +37,46 @@ def _cost(s: ModeSummary) -> str:
     return f"${s.cost_usd:.4f}"
 
 
+def _failure_reasons(results: list[RunResult], limit: int = 3) -> list[str]:
+    """Distinct reasons from incomplete runs, with the per-case prefix and per-request ids stripped."""
+    seen: dict[str, None] = {}
+    for r in results:
+        if r.completed:
+            continue
+        for note in r.notes:
+            text = re.sub(r"^\[[^\]]*\]\s*", "", note)
+            text = re.sub(r"'request_id': '[^']*'", "'request_id': …", text)
+            seen.setdefault(redact(text)[:300], None)
+    return list(seen)[:limit]
+
+
+def _incomplete_warning(results: list[RunResult]) -> list[str]:
+    bad = [r for r in results if not r.completed]
+    if not bad:
+        return []
+    head = (
+        f"> ⚠️ **불완전 리뷰 {len(bad)}/{len(results)}건.** 호출 또는 응답 파싱이 실패한 실행은 '탐지 못함'으로 집계되므로, "
+        "아래 탐지율에는 리뷰어의 능력이 아니라 실패가 섞여 있습니다."
+    )
+    if len(bad) == len(results):
+        head = (
+            f"> ⚠️ **모든 리뷰({len(results)}건)가 실패했습니다.** 아래 수치는 리뷰어 성능이 아닙니다 — 인용하지 마세요. "
+            "(예: 크레딧 부족, 키 오류, 모델 ID 오류)"
+        )
+    reasons = _failure_reasons(results)
+    return [head, *[f"> - 실패 사유: {x}" for x in reasons], ""]
+
+
 def render_report(cases: list[Case], results: list[RunResult], modes: list[str], mock: bool, repeats: int) -> str:
     lines = ["# DevOrch Benchmark Report", ""]
     if mock:
         lines += [MOCK_BANNER, ""]
+    lines += _incomplete_warning(results)
     n_def = sum(len(c.defects) for c in cases)
+    models = {p: m for r in results for p, m in r.models.items()}
     lines += [
         f"- 케이스 {len(cases)}개 (결함 {n_def}개 / 대조군 {sum(c.clean for c in cases)}개), 반복 {repeats}회, 모드: {', '.join(modes)}",
+        "- 사용 모델: " + (", ".join(f"{p}={m}" for p, m in sorted(models.items())) if models else "기록 없음(응답을 받은 호출이 없음)"),
         "",
         "## 요약 (95% Wilson 신뢰구간)",
         "",

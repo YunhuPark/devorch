@@ -24,7 +24,7 @@ from devorch.core.execution.sandbox import load_sandbox
 from devorch.core.execution.executor import ExecutionError, Executor
 from devorch.core.execution.patch import PatchError, validate_diff
 from devorch.core.orchestrator.engine import WorkflowRun
-from devorch.core.orchestrator.review import run_reviews
+from devorch.core.orchestrator.review import budget_preflight, run_reviews
 from devorch.core.orchestrator.state import State
 from devorch.core.router.model_router import plan_routing
 from devorch.git.manager import GitError
@@ -259,6 +259,9 @@ class ControlPlane:
         if missing:
             detail = "; ".join(f"{m}: {self.provider_notes.get(m, '등록되지 않음')}" for m in missing)
             raise ControlPlaneError(f"리뷰에 필요한 provider를 사용할 수 없습니다 — {detail}")
+        cap = self.policy.limits.max_cost_usd
+        if (problem := budget_preflight(self.providers, {s.provider for s in steps}, cap)) is not None:
+            raise ControlPlaneError(problem)
 
         sha = self._capture_diff(record)
         ev = run.evaluation
@@ -278,7 +281,7 @@ class ControlPlane:
         findings: list[Finding] = []
         completed: list[str] = []
         if steps:
-            findings, completed = await run_reviews(run, steps, self.providers, self.audit, label=f"review {record.review_rounds}: ")
+            findings, completed = await run_reviews(run, steps, self.providers, self.audit, label=f"review {record.review_rounds}: ", max_cost_usd=cap)
         run.findings = findings
         run.evaluation = evaluate(findings, required, completed)
         record.reviewed_sha = sha

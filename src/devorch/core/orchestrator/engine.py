@@ -21,7 +21,7 @@ from devorch.core.analyzer.impact_analyzer import analyze_impact
 from devorch.core.analyzer.risk_engine import assess_risk
 from devorch.core.analyzer.task_analyzer import analyze_task
 from devorch.core.evaluator.evaluator import evaluate
-from devorch.core.orchestrator.review import build_context, call_provider, run_reviews
+from devorch.core.orchestrator.review import budget_preflight, build_context, call_provider, run_reviews
 from devorch.core.orchestrator.state import State, check_transition
 from devorch.core.router.model_router import plan_routing
 from devorch.models import (
@@ -63,6 +63,7 @@ class WorkflowRun(BaseModel):
     notes: list[str] = Field(default_factory=list)
     total_cost_usd: float = 0.0
     cost_unknown: bool = False
+    models: dict[str, str] = Field(default_factory=dict)  # provider -> model id actually used
     branch: str | None = None
     worktree: str | None = None
     commit: str | None = None
@@ -138,6 +139,9 @@ class WorkflowEngine:
         unregistered = sorted({s.provider for s in plan.steps} - set(self.providers.names()))
         if unregistered:
             return self._fail(run, f"등록되지 않은 provider: {', '.join(unregistered)} (등록됨: {', '.join(self.providers.names()) or '없음'})")
+        cap = self.policy.limits.max_cost_usd
+        if (problem := budget_preflight(self.providers, {s.provider for s in plan.steps}, cap)) is not None:
+            return self._fail(run, problem)
         impl_step = plan.implementation_step
         review_steps = plan.review_steps
         required = [s.role for s in review_steps]
@@ -148,14 +152,14 @@ class WorkflowEngine:
         while True:
             run.rounds += 1
             self._move(run, State.DISPATCHING, round=run.rounds)
-            resp = await call_provider(run, self.providers, self.audit, impl_step, LLMRequest(role="implementation", system=IMPLEMENTER_SYSTEM, prompt=self._implementation_prompt(run, blocking)))
+            resp = await call_provider(run, self.providers, self.audit, impl_step, LLMRequest(role="implementation", system=IMPLEMENTER_SYSTEM, prompt=self._implementation_prompt(run, blocking)), max_cost_usd=cap)
             run.implementation = resp.text
 
             findings: list[Finding] = []
             completed: list[str] = []
             if review_steps:
                 self._move(run, State.REVIEWING)
-                findings, completed = await run_reviews(run, review_steps, self.providers, self.audit, label=f"round {run.rounds}: ")
+                findings, completed = await run_reviews(run, review_steps, self.providers, self.audit, label=f"round {run.rounds}: ", max_cost_usd=cap)
 
             run.findings = findings
             self._move(run, State.EVALUATING)
