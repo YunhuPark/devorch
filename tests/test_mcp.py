@@ -1,8 +1,8 @@
 import json
-import subprocess
 import sys
 
 import pytest
+from gitutil import run_git
 from mcp.client import Client
 from typer.testing import CliRunner
 
@@ -25,7 +25,7 @@ HIGH_TASK = "로그인 JWT 인증 추가 calc.py"
 
 
 def git(repo, *args):
-    return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+    return run_git(repo, *args).stdout.strip()
 
 
 @pytest.fixture

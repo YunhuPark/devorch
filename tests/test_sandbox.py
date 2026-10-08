@@ -1,6 +1,9 @@
+import asyncio
 import json
 import os
+import shutil
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -42,15 +45,26 @@ sys.exit(0)
 def shim(tmp_path, monkeypatch):
     bindir = tmp_path / "bin"
     bindir.mkdir()
-    d = bindir / "docker"
-    d.write_text(SHIM)
+    d = bindir / ("docker_shim.py" if sys.platform == "win32" else "docker")
+    d.write_text(SHIM, encoding="utf-8")
     d.chmod(d.stat().st_mode | stat.S_IEXEC)
     log = tmp_path / "docker.log"
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("SHIM_LOG", str(log))
+    if sys.platform == "win32":
+        # CreateProcess can't run an extension-less script: route only the "docker" executable to the shim.
+        real_exec, real_which = asyncio.create_subprocess_exec, shutil.which
+
+        async def fake_exec(program, *args, **kw):
+            if program == "docker":
+                program, args = sys.executable, (str(d), *args)
+            return await real_exec(program, *args, **kw)
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+        monkeypatch.setattr(shutil, "which", lambda cmd, *a, **kw: str(d) if cmd == "docker" else real_which(cmd, *a, **kw))
 
     def calls():
-        return [json.loads(l) for l in log.read_text().splitlines()] if log.exists() else []
+        return [json.loads(l) for l in log.read_text(encoding="utf-8").splitlines()] if log.exists() else []
 
     return calls
 

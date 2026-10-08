@@ -1,7 +1,7 @@
 import json
-import subprocess
 
 import pytest
+from gitutil import run_git
 from typer.testing import CliRunner
 
 from devorch.bench.cases import Case, Defect, FileChange, build_diff, load_cases, validate_cases
@@ -38,14 +38,14 @@ def test_builtin_cases_are_valid():
 
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c.id)
 def test_diff_applies_cleanly_to_before_state(case, tmp_path):
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    run_git(tmp_path, "init", "-q")
     for path, ch in case.files.items():
         if ch.before is not None:
             p = tmp_path / path
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(ch.before)
-    (tmp_path / "case.diff").write_text(case.diff)
-    r = subprocess.run(["git", "apply", "--check", "case.diff"], cwd=tmp_path, capture_output=True, text=True)
+            p.write_bytes(ch.before.encode("utf-8"))  # bytes: keep LF (write_text would turn it into CRLF on Windows)
+    (tmp_path / "case.diff").write_bytes(case.diff.encode("utf-8"))
+    r = run_git(tmp_path, "apply", "--check", "case.diff", check=False)
     assert r.returncode == 0, r.stderr
 
 
@@ -155,9 +155,9 @@ def test_cli_mock_run_writes_files_with_banner(tmp_path):
     assert r.exit_code == 0, r.output
     dirs = list((tmp_path / ".devorch" / "bench").iterdir())
     assert len(dirs) == 1
-    report = (dirs[0] / "report.md").read_text()
+    report = (dirs[0] / "report.md").read_text(encoding="utf-8")
     assert "MOCK — harness check only" in report and "## 한계" in report
-    data = json.loads((dirs[0] / "results.json").read_text())
+    data = json.loads((dirs[0] / "results.json").read_text(encoding="utf-8"))
     assert data["mock"] is True and len(data["results"]) == 4
 
 

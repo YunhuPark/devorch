@@ -1,8 +1,9 @@
-import subprocess
+import asyncio
 import sys
 from pathlib import Path
 
 import pytest
+from gitutil import run_git
 from typer.testing import CliRunner
 
 from devorch.cli.main import app
@@ -32,7 +33,7 @@ WRONG_CONTEXT_DIFF = GOOD_DIFF.replace(" def add(a, b):", " def plus(a, b):")
 
 
 def git(repo, *args):
-    return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+    return run_git(repo, *args).stdout.strip()
 
 
 @pytest.fixture
@@ -121,7 +122,7 @@ def test_ensure_ready_failures(tmp_path, repo):
         GitManager(tmp_path / "nothing").ensure_ready() if (tmp_path / "nothing").mkdir() is None else None
     empty = tmp_path / "empty"
     empty.mkdir()
-    subprocess.run(["git", "init", "-q"], cwd=empty, check=True)
+    run_git(empty, "init", "-q")
     with pytest.raises(GitError, match="커밋이 하나도"):
         GitManager(empty).ensure_ready()
     sub = repo / "sub"
@@ -166,6 +167,22 @@ async def test_runner_rejects_disallowed_and_handles_timeout(tmp_path):
     (tmp_path / "test_slow.py").write_text("import time\n\ndef test_slow():\n    time.sleep(30)\n")
     r = await run_tests(PYTEST_CMD, tmp_path, [PYTEST_CMD], 1.5)
     assert not r.ok and "중단" in r.reason
+
+
+async def test_timeout_kills_child_processes_too(tmp_path):
+    marker = tmp_path / "child_survived.txt"
+    child = f"import time, pathlib; time.sleep(3); pathlib.Path({str(marker)!r}).write_text('alive')"
+    (tmp_path / "test_spawn.py").write_text(
+        "import subprocess, sys, time\n\n"
+        "def test_spawn():\n"
+        f"    subprocess.Popen([sys.executable, '-c', {child!r}])\n"
+        "    time.sleep(30)\n",
+        encoding="utf-8",
+    )
+    r = await run_tests(PYTEST_CMD, tmp_path, [PYTEST_CMD], 1.5)
+    assert not r.ok and "중단" in r.reason
+    await asyncio.sleep(4)  # long enough for an orphaned child to have written the marker
+    assert not marker.exists(), "timeout left a child process running"
 
 
 # ---- executor end-to-end ---------------------------------------------------

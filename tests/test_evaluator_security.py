@@ -5,7 +5,7 @@ import pytest
 from devorch.core.evaluator.evaluator import evaluate, parse_findings
 from devorch.core.orchestrator.state import InvalidTransition, State, check_transition
 from devorch.models import Finding, Severity
-from devorch.security.command_policy import check_command
+from devorch.security.command_policy import check_command, split_command
 from devorch.security.path_guard import PathEscapeError, resolve_inside
 from devorch.security.secret_redactor import redact, redact_obj
 
@@ -102,6 +102,22 @@ def test_blocked_commands(cmd):
     assert not check_command(cmd, ALLOWED)[0]
 
 
+@pytest.mark.parametrize("arg", ["C:\\Windows\\System32", "c:secret.txt", "\\\\server\\share\\x", "\\etc\\passwd", "..\\..\\x", "sub\\..\\..\\x"])
+def test_blocked_windows_style_path_arguments(arg):
+    assert not check_command(f"pytest {arg}", ALLOWED, posix=False)[0]
+
+
+def test_windows_interpreter_path_keeps_its_backslashes():
+    exe = "C:\\Users\\me\\proj\\.venv\\Scripts\\python.exe"
+    assert split_command(f"{exe} -m pytest -q", posix=False) == [exe, "-m", "pytest", "-q"]
+    assert split_command(f'"C:\\Program Files\\x\\python.exe" -m pytest', posix=False)[0] == "C:\\Program Files\\x\\python.exe"
+    allowed = [f"{exe} -m pytest -q"]
+    assert check_command(f"{exe} -m pytest -q", allowed, posix=False)[0]
+    assert not check_command(f"{exe} -m pytest -q C:\\other", allowed, posix=False)[0]  # allowlist prefix doesn't open the door
+    assert not check_command(f"{exe} -m pip install x", allowed, posix=False)[0]
+    assert not check_command("C:\\Windows\\System32\\cmd.exe /c dir", allowed, posix=False)[0]
+
+
 # ---- path guard & redactor ------------------------------------------------
 def test_path_guard(tmp_path):
     assert resolve_inside(tmp_path, "src/a.py") == (tmp_path / "src/a.py").resolve()
@@ -115,7 +131,10 @@ def test_path_guard_blocks_symlink_escape(tmp_path):
     outside.mkdir()
     root = tmp_path / "root"
     root.mkdir()
-    (root / "link").symlink_to(outside)
+    try:
+        (root / "link").symlink_to(outside)
+    except OSError as e:  # Windows without Developer Mode / admin rights (WinError 1314)
+        pytest.skip(f"symlink를 만들 권한이 없어 검증하지 못함: {e}")
     with pytest.raises(PathEscapeError):
         resolve_inside(root, "link/secret.txt")
 

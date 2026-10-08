@@ -85,7 +85,7 @@ async def test_audit_filter_limit_and_corrupt_line(served, repo):
     plane, _, port = served
     a = plane.analyze_task(LOW_TASK)["task_id"]
     b = plane.analyze_task(LOW_TASK)["task_id"]
-    with (repo / ".devorch" / "audit.jsonl").open("a") as f:
+    with (repo / ".devorch" / "audit.jsonl").open("a", encoding="utf-8") as f:
         f.write("{not json\n")
     plane.audit.log(a, "x_event", {"k": 1})
     allev = json.loads(get(port, "/api/audit")[2])

@@ -11,12 +11,12 @@ from __future__ import annotations
 import asyncio
 import os
 import re
-import shlex
 import signal
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from devorch.security.command_policy import check_command
+from devorch.security.command_policy import check_command, split_command
 
 OUTPUT_TAIL_CHARS = 4000
 _SENSITIVE_ENV = re.compile(r"(?i)(api[_-]?key|secret|token|password|passwd|credential|authorization)")
@@ -67,6 +67,35 @@ def safe_env(extra_blocked: set[str] | None = None) -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k not in blocked and not _SENSITIVE_ENV.search(k)}
 
 
+def _new_group_kwargs() -> dict:
+    """Put the test process in its own group/session so a timeout can take its children down too."""
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+async def _kill_tree(proc: asyncio.subprocess.Process) -> None:
+    """Kill the process and its descendants (best effort; the process itself is always killed)."""
+    if os.name == "nt":
+        try:
+            killer = await asyncio.create_subprocess_exec(
+                "taskkill", "/PID", str(proc.pid), "/T", "/F",
+                stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(killer.wait(), timeout=10)
+        except (OSError, asyncio.TimeoutError):
+            pass
+        try:
+            proc.kill()  # taskkill missing/failed, or only the child tree was left
+        except ProcessLookupError:
+            pass
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
 async def run_tests(
     command: str,
     cwd: Path,
@@ -78,26 +107,26 @@ async def run_tests(
     if not ok:
         return TestResult(False, command, None, "", f"테스트 명령이 정책에 의해 거부됨: {why}")
 
+    argv = split_command(command)
     try:
         proc = await asyncio.create_subprocess_exec(
-            *shlex.split(command),
+            *argv,
             cwd=str(cwd),
             env=safe_env(extra_blocked_env),
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            start_new_session=True,
+            **_new_group_kwargs(),
         )
     except FileNotFoundError:
-        return TestResult(False, command, None, "", f"실행 파일을 찾을 수 없음: {shlex.split(command)[0]}")
+        return TestResult(False, command, None, "", f"실행 파일을 찾을 수 없음: {argv[0]}")
+    except OSError as e:  # e.g. PermissionError — the tests did not run, which must never read as "passed"
+        return TestResult(False, command, None, "", f"테스트 명령을 실행하지 못함: {e}")
 
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
     except asyncio.TimeoutError:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        await _kill_tree(proc)
         await proc.wait()
         return TestResult(False, command, None, "", f"테스트가 {timeout_s:.0f}초 내에 끝나지 않아 중단됨")
 

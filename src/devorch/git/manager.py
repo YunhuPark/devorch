@@ -6,13 +6,34 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 GIT_TIMEOUT_S = 60
 
 
+LAUNCH_RETRIES = 3
+
+
 class GitError(RuntimeError):
     pass
+
+
+def _run_git(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
+    """``subprocess.run`` that retries when Windows refuses to *start* git (WinError 5).
+
+    Observed intermittently (~0.5-1% of launches) for git.exe on one Windows machine, never for python.exe;
+    root cause not established (antivirus scanning is a guess). A refused launch means git never ran, so a
+    retry cannot repeat a side effect. Anything else — including the final refusal — is raised as is.
+    """
+    for attempt in range(LAUNCH_RETRIES):
+        try:
+            return subprocess.run(argv, **kwargs)
+        except PermissionError as e:
+            if os.name != "nt" or getattr(e, "winerror", None) != 5 or attempt == LAUNCH_RETRIES - 1:
+                raise
+            time.sleep(0.2 * (attempt + 1))
+    raise AssertionError("unreachable")
 
 
 class GitManager:
@@ -21,15 +42,22 @@ class GitManager:
 
     def _git(self, args: list[str], cwd: Path | None = None, input_text: str | None = None, check: bool = True, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
         try:
-            proc = subprocess.run(
+            # Bytes in/out, decoded as UTF-8 here: text=True would use the locale codec (cp949 on Korean
+            # Windows) and translate \n <-> \r\n, so the diff that gets applied would not be the diff that was reviewed.
+            raw = _run_git(
                 ["git", *args],
                 cwd=str(cwd or self.root),
-                input=input_text,
+                input=input_text.encode("utf-8") if input_text is not None else None,
                 env=env,
                 capture_output=True,
-                text=True,
                 timeout=GIT_TIMEOUT_S,
             )
+            proc = subprocess.CompletedProcess(
+                raw.args, raw.returncode,
+                raw.stdout.decode("utf-8", errors="replace"), raw.stderr.decode("utf-8", errors="replace"),
+            )
+        except PermissionError as e:
+            raise GitError(f"git 을 실행하지 못함 (접근 거부): {e}") from e
         except FileNotFoundError as e:
             raise GitError("git 실행 파일을 찾을 수 없음") from e
         except subprocess.TimeoutExpired as e:

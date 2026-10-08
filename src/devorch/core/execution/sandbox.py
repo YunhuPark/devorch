@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shlex
 import shutil
 import uuid
 from pathlib import Path
@@ -25,7 +24,7 @@ from pathlib import Path
 from pydantic import BaseModel, field_validator
 
 from devorch.core.execution.test_runner import OUTPUT_TAIL_CHARS, TestResult
-from devorch.security.command_policy import check_command
+from devorch.security.command_policy import check_command, split_command
 
 
 class SandboxConfig(BaseModel):
@@ -59,6 +58,20 @@ def load_sandbox(config: dict) -> SandboxConfig:
     return SandboxConfig.model_validate((config.get("project") or {}).get("sandbox") or {})
 
 
+FALLBACK_UID_GID = (1000, 1000)
+
+
+def container_user() -> tuple[int, int]:
+    """uid:gid the container runs as — the host user's where the OS has one, never root.
+
+    Windows has no uid/gid, so a fixed unprivileged id is used. UNVERIFIED: whether bind mounts of a
+    Windows worktree are writable for that id under Docker Desktop has not been tried.
+    """
+    if hasattr(os, "getuid") and hasattr(os, "getgid"):
+        return os.getuid(), os.getgid()
+    return FALLBACK_UID_GID
+
+
 def build_docker_args(cfg: SandboxConfig, name: str, cwd: Path, command: str, uid: int, gid: int) -> list[str]:
     assert cfg.image
     return [
@@ -70,7 +83,7 @@ def build_docker_args(cfg: SandboxConfig, name: str, cwd: Path, command: str, ui
         "--tmpfs", "/tmp:rw,size=256m",
         "-e", "HOME=/tmp",
         "-v", f"{Path(cwd).resolve()}:/work", "-w", "/work",
-        cfg.image, *shlex.split(command),
+        cfg.image, *split_command(command, posix=True),
     ]
 
 
@@ -108,7 +121,7 @@ async def sandbox_status(cfg: SandboxConfig) -> list[tuple[str, bool, str]]:
 async def run_tests_docker(
     command: str, cwd: Path, allowed: list[str], timeout_s: float, cfg: SandboxConfig
 ) -> TestResult:
-    ok, why = check_command(command, allowed)
+    ok, why = check_command(command, allowed, posix=True)  # the command runs in a Linux container
     if not ok:
         return TestResult(False, command, None, "", f"테스트 명령이 정책에 의해 거부됨: {why}")
     if not cfg.image:
@@ -117,7 +130,8 @@ async def run_tests_docker(
         return TestResult(False, command, None, "", "sandbox.mode=docker 인데 docker 를 찾을 수 없음 (호스트 실행으로 대체하지 않음)")
 
     name = f"devorch-{uuid.uuid4().hex[:12]}"
-    args = build_docker_args(cfg, name, cwd, command, os.getuid(), os.getgid())
+    uid, gid = container_user()
+    args = build_docker_args(cfg, name, cwd, command, uid, gid)
     proc = await asyncio.create_subprocess_exec(
         *args, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
     )
