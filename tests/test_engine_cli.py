@@ -189,3 +189,13 @@ def test_cli_run_mock_with_approval(tmp_path):
     no = runner.invoke(app, ["run", "로그인 JWT 인증 추가", "-p", str(tmp_path), "--mock"], input="n\n")
     assert no.exit_code == 1 and "REJECTED" in no.output
     assert (tmp_path / ".devorch" / "audit.jsonl").exists()
+
+
+def test_python_dash_m_devorch_runs_the_same_cli(tmp_path):
+    import subprocess
+    import sys
+
+    r = subprocess.run([sys.executable, "-m", "devorch", "bench", "run", "--help"], capture_output=True, text=True, encoding="utf-8", cwd=tmp_path)
+    assert r.returncode == 0 and "--max-total-usd" in r.stdout
+    r = subprocess.run([sys.executable, "-m", "devorch", "providers", "-p", str(tmp_path)], capture_output=True, text=True, encoding="utf-8", cwd=tmp_path)
+    assert r.returncode == 0 and "claude" in r.stdout
