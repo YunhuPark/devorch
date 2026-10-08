@@ -1,0 +1,32 @@
+id: c07_path_traversal
+title: 업로드 파일 다운로드 (경로 탈출)
+task: 업로드된 파일을 이름으로 다운로드하는 기능을 정리해줘
+files:
+  app/files.py:
+    before: |
+      import os
+
+      UPLOAD_DIR = "/srv/uploads"
+
+
+      def read_upload(name: str) -> bytes:
+          path = os.path.join(UPLOAD_DIR, os.path.basename(name))
+          with open(path, "rb") as f:
+              return f.read()
+    after: |
+      import os
+
+      UPLOAD_DIR = "/srv/uploads"
+
+
+      def read_upload(name: str) -> bytes:
+          path = os.path.join(UPLOAD_DIR, name)
+          with open(path, "rb") as f:
+              return f.read()
+defects:
+  - id: traversal
+    category: security
+    severity: high
+    description: basename 제거로 ../ 를 이용한 경로 탈출(path traversal) 가능
+    match_any: ["path.?traversal", "directory traversal", "\\.\\./", "basename", "경로 ?(탈출|조작|순회)", "디렉터?토리 ?트래버설"]
+    file: app/files.py

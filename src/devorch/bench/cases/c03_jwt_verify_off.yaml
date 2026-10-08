@@ -1,0 +1,35 @@
+id: c03_jwt_verify_off
+title: 토큰 만료 처리 추가 (서명 검증 비활성화)
+task: JWT 토큰이 만료되면 명확한 에러를 돌려주도록 고쳐줘
+files:
+  app/token.py:
+    before: |
+      import jwt
+
+      SECRET = "load-from-env"
+
+
+      def read_token(token: str) -> dict:
+          return jwt.decode(token, SECRET, algorithms=["HS256"])
+    after: |
+      import jwt
+
+      SECRET = "load-from-env"
+
+
+      class TokenExpired(Exception):
+          pass
+
+
+      def read_token(token: str) -> dict:
+          try:
+              return jwt.decode(token, SECRET, algorithms=["HS256"], options={"verify_signature": False})
+          except jwt.ExpiredSignatureError as e:
+              raise TokenExpired(str(e)) from e
+defects:
+  - id: sig_off
+    category: security
+    severity: critical
+    description: verify_signature=False 로 서명 검증이 꺼져 위조 토큰이 통과됨
+    match_any: ["verify_signature", "signature (verification|check)", "forge", "위조", "서명.{0,10}(검증|확인)"]
+    file: app/token.py

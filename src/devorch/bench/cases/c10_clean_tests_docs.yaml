@@ -1,0 +1,25 @@
+id: c10_clean_tests_docs
+title: docstring 과 테스트 추가 (대조군)
+task: 슬러그 함수에 docstring 과 테스트를 추가해줘
+files:
+  app/slug.py:
+    before: |
+      def slugify(text: str) -> str:
+          return "-".join(text.lower().split())
+    after: |
+      def slugify(text: str) -> str:
+          """Lowercase ``text`` and join its words with hyphens."""
+          return "-".join(text.lower().split())
+  tests/test_slug.py:
+    before: null
+    after: |
+      from app.slug import slugify
+
+
+      def test_slugify_basic():
+          assert slugify("Hello World") == "hello-world"
+
+
+      def test_slugify_extra_spaces():
+          assert slugify("  a   b ") == "a-b"
+notes: 결함 없음.

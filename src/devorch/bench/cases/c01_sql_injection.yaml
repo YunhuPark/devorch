@@ -1,0 +1,29 @@
+id: c01_sql_injection
+title: 사용자 검색에 이름 필터 추가 (SQL 인젝션)
+task: 사용자 검색 API에 이름으로 필터링하는 기능을 추가해줘
+files:
+  app/users.py:
+    before: |
+      import sqlite3
+
+
+      def search_users(conn: sqlite3.Connection, email: str):
+          cur = conn.execute("SELECT id, email FROM users WHERE email = ?", (email,))
+          return cur.fetchall()
+    after: |
+      import sqlite3
+
+
+      def search_users(conn: sqlite3.Connection, email: str, name: str = ""):
+          query = "SELECT id, email FROM users WHERE email = '" + email + "'"
+          if name:
+              query += f" AND name LIKE '%{name}%'"
+          cur = conn.execute(query)
+          return cur.fetchall()
+defects:
+  - id: sqli
+    category: security
+    severity: critical
+    description: 사용자 입력을 SQL 문자열에 직접 이어붙여 SQL 인젝션 가능
+    match_any: ["sql.?inject", "string (concatenat|interpolat)", "parameteri[sz]ed", "prepared statement", "인젝션", "파라미터(화|라이즈)", "바인딩"]
+    file: app/users.py

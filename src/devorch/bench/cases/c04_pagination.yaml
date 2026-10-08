@@ -1,0 +1,27 @@
+id: c04_pagination
+title: 페이지네이션 헬퍼 (off-by-one, 총 페이지 수)
+task: 목록 API에 페이지네이션 헬퍼를 추가해줘 (page는 1부터 시작)
+files:
+  app/paging.py:
+    before: null
+    after: |
+      def paginate(items: list, page: int, size: int) -> list:
+          start = page * size
+          return items[start : start + size]
+
+
+      def total_pages(count: int, size: int) -> int:
+          return count // size
+defects:
+  - id: off_by_one
+    category: logic
+    severity: medium
+    description: page 가 1부터 시작하는데 start = page * size 라 첫 페이지를 건너뜀
+    match_any: ["off.by.one", "(first|1st) page", "page\\s*-\\s*1", "1-based", "1부터", "첫 ?페이지"]
+    file: app/paging.py
+  - id: floor_div
+    category: logic
+    severity: medium
+    description: total_pages 가 내림 나눗셈이라 마지막 부분 페이지가 누락됨
+    match_any: ["ceil", "round(ing)? up", "partial page", "remainder", "마지막 ?페이지", "나머지", "올림", "내림"]
+    file: app/paging.py

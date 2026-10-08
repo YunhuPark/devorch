@@ -1,0 +1,25 @@
+id: c11_clean_safe_like
+title: 안전한 파라미터화 LIKE 검색 (오탐 유도 대조군)
+task: 사용자 검색 API에 이름으로 필터링하는 기능을 추가해줘
+files:
+  app/users.py:
+    before: |
+      import sqlite3
+
+
+      def search_users(conn: sqlite3.Connection, email: str):
+          cur = conn.execute("SELECT id, email FROM users WHERE email = ?", (email,))
+          return cur.fetchall()
+    after: |
+      import sqlite3
+
+
+      def search_users(conn: sqlite3.Connection, email: str, name: str = ""):
+          query = "SELECT id, email FROM users WHERE email = ?"
+          params: list[str] = [email]
+          if name:
+              query += " AND name LIKE ?"
+              params.append(f"%{name}%")
+          cur = conn.execute(query, params)
+          return cur.fetchall()
+notes: f-string 이 보이지만 값은 바인딩 파라미터로만 전달됨 — SQL 인젝션 아님. 오탐 여부를 보는 케이스.

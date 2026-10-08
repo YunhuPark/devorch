@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "devorch"
+version = "0.1.0"
+description = "DevOrch — AI Development Control Plane: routing, risk analysis, verification, approval and audit for AI-driven development"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.12",
+    "pyyaml>=6",
+    "pydantic>=2.5",
+    "mcp>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+llm = ["anthropic>=0.40", "openai>=1.60", "google-genai>=1.0"]
+
+[project.scripts]
+devorch = "devorch.cli.main:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+devorch = ["bench/cases/*.yaml"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
