@@ -158,7 +158,8 @@ class GeminiProvider(_PricedProvider):
             raise ProviderError(f"{self.name}: 빈 응답 또는 차단됨 (finish_reason={finish or 'n/a'})")
         usage = getattr(resp, "usage_metadata", None)
         in_tok = getattr(usage, "prompt_token_count", 0) or 0
-        out_tok = getattr(usage, "candidates_token_count", 0) or 0
+        # Thinking tokens are reported separately from the answer but billed at the output rate.
+        out_tok = (getattr(usage, "candidates_token_count", 0) or 0) + (getattr(usage, "thoughts_token_count", 0) or 0)
         return LLMResponse(
             text=text, provider=self.name, model=self.model, input_tokens=in_tok, output_tokens=out_tok,
             cost_usd=_cost(self.prices, in_tok, out_tok), latency_s=round(time.monotonic() - t0, 3),

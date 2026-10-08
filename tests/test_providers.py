@@ -88,6 +88,25 @@ async def test_gemini_success_and_request_shape():
     assert kw["config"] == {"max_output_tokens": 500, "system_instruction": "be strict"}
 
 
+async def test_gemini_thinking_tokens_are_counted_as_output_and_billed():
+    # Gemini reports generated "thoughts" separately from the visible answer, but bills them as output.
+    usage = NS(prompt_token_count=1000, candidates_token_count=100, thoughts_token_count=900)
+    result = NS(text="[]", candidates=[NS(finish_reason="STOP")], usage_metadata=usage)
+    resp = await GeminiProvider("m", client=gem(result), prices=PRICES).generate(REQ)
+    assert resp.output_tokens == 1000
+    assert resp.cost_usd == pytest.approx(1000 * 3.0 / 1e6 + 1000 * 15.0 / 1e6)
+
+
+async def test_gemini_missing_thoughts_field_or_none_counts_as_zero():
+    for thoughts in (None, 0):
+        usage = NS(prompt_token_count=10, candidates_token_count=5, thoughts_token_count=thoughts)
+        result = NS(text="[]", candidates=[NS(finish_reason="STOP")], usage_metadata=usage)
+        assert (await GeminiProvider("m", client=gem(result)).generate(REQ)).output_tokens == 5
+    old = NS(prompt_token_count=10, candidates_token_count=5)  # a response object without the field at all
+    result = NS(text="[]", candidates=[NS(finish_reason="STOP")], usage_metadata=old)
+    assert (await GeminiProvider("m", client=gem(result)).generate(REQ)).output_tokens == 5
+
+
 async def test_gemini_truncated_blocked_raise():
     trunc = gem(NS(text="par", candidates=[NS(finish_reason="FinishReason.MAX_TOKENS")], usage_metadata=None))
     with pytest.raises(ProviderError, match="잘림"):
