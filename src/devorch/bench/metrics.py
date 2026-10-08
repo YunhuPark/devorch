@@ -21,6 +21,14 @@ def matches_defect(f: Finding, d: Defect) -> bool:
     return any(re.search(rx, text, re.IGNORECASE) for rx in d.match_any)
 
 
+def trap_alarmed(case: Case, findings: list[Finding]) -> bool:
+    """A finding of >= MEDIUM whose text matches one of the control case's declared false-alarm patterns."""
+    return any(
+        f.severity.rank >= FP_MIN_SEVERITY.rank and any(re.search(rx, finding_text(f), re.IGNORECASE) for t in case.traps for rx in t.match_any)
+        for f in findings
+    )
+
+
 def judge(case: Case, findings: list[Finding]) -> tuple[set[str], int]:
     """Return (detected defect ids, number of findings matching no seeded defect)."""
     detected: set[str] = set()
@@ -63,7 +71,8 @@ class RunResult:
     findings: list[Finding] = field(default_factory=list)
     detected: set[str] = field(default_factory=set)
     unmatched: int = 0
-    false_positive: bool = False
+    false_positive: bool = False  # strict: ANY finding >= MEDIUM on a clean control
+    trap_alarm: bool = False  # narrow: a >= MEDIUM finding that matches the case's declared trap (cases with traps only)
     cost_usd: float = 0.0
     cost_unknown: bool = False
     latency_s: float = 0.0
@@ -88,6 +97,7 @@ class RunResult:
             "detected": sorted(self.detected),
             "unmatched": self.unmatched,
             "false_positive": self.false_positive,
+            "trap_alarm": self.trap_alarm,
             "cost_usd": self.cost_usd,
             "cost_unknown": self.cost_unknown,
             "latency_s": round(self.latency_s, 3),
@@ -102,7 +112,8 @@ def score_run(case: Case, mode: str, repeat: int, findings: list[Finding], compl
     # An incomplete review detects nothing (fail-closed), whatever partial findings exist.
     detected, unmatched = judge(case, findings) if completed else (set(), 0)
     fp = bool(case.clean and completed and any(f.severity.rank >= FP_MIN_SEVERITY.rank for f in findings))
-    return RunResult(case.id, mode, repeat, completed, findings, detected, unmatched, fp, **kw)
+    trap = bool(case.clean and case.traps and completed and trap_alarmed(case, findings))
+    return RunResult(case.id, mode, repeat, completed, findings, detected, unmatched, fp, trap, **kw)
 
 
 @dataclass
@@ -121,6 +132,16 @@ class ModeSummary:
     by_category: dict[str, tuple[int, int]]  # category -> (detected, total)
     input_tokens: int = 0
     output_tokens: int = 0
+    trap_runs_completed: int = 0  # completed runs of clean cases that declare a trap
+    trap_alarms: int = 0
+
+    @property
+    def trap_rate(self) -> float:
+        return self.trap_alarms / self.trap_runs_completed if self.trap_runs_completed else 0.0
+
+    @property
+    def trap_ci(self) -> tuple[float, float]:
+        return wilson(self.trap_alarms, self.trap_runs_completed)
 
     @property
     def detection_rate(self) -> float:
@@ -168,6 +189,8 @@ def summarize(cases: list[Case], results: list[RunResult], mode: str) -> ModeSum
         by_category={k: (v[0], v[1]) for k, v in cats.items()},
         input_tokens=sum(r.input_tokens for r in rs),
         output_tokens=sum(r.output_tokens for r in rs),
+        trap_runs_completed=sum(bool(by_id[r.case_id].traps) for r in clean_done),
+        trap_alarms=sum(r.trap_alarm for r in clean_done),
     )
 
 

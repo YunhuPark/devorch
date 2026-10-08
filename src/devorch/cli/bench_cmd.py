@@ -130,6 +130,7 @@ def _summary_dict(s) -> dict:
         "defect_runs": s.defect_runs, "detected": s.detected, "detection_rate": s.detection_rate,
         "detection_ci": s.detection_ci, "clean_runs_completed": s.clean_runs_completed,
         "false_positives": s.false_positives, "fp_rate": s.fp_rate, "fp_ci": s.fp_ci,
+        "trap_runs_completed": s.trap_runs_completed, "trap_alarms": s.trap_alarms, "trap_rate": s.trap_rate, "trap_ci": s.trap_ci,
         "incomplete": s.incomplete, "unmatched": s.unmatched, "cost_usd": s.cost_usd,
         "cost_unknown": s.cost_unknown, "mean_latency_s": s.mean_latency_s,
         "input_tokens": s.input_tokens, "output_tokens": s.output_tokens,

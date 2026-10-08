@@ -33,12 +33,23 @@ class Defect(BaseModel):
     file: str | None = None
 
 
+class Trap(BaseModel):
+    """What counts as a *false alarm* on a clean control: a finding of MEDIUM or higher whose text matches any regex.
+
+    Declared per control case, in advance. Controls without a trap are still scored by the strict rule only."""
+
+    id: str
+    description: str
+    match_any: list[str]
+
+
 class Case(BaseModel):
     id: str
     title: str
     task: str
     files: dict[str, FileChange]
     defects: list[Defect] = Field(default_factory=list)
+    traps: list[Trap] = Field(default_factory=list)  # only meaningful on clean cases
     notes: str = ""
 
     @property
@@ -99,6 +110,20 @@ def validate_cases(cases: list[Case]) -> list[str]:
                     problems.append(f"{c.id}.{d.id}: 잘못된 정규식 {rx!r} — {e}")
             if d.file and d.file not in c.files:
                 problems.append(f"{c.id}.{d.id}: file {d.file!r} 이(가) 케이스에 없음")
+        if c.traps and c.defects:
+            problems.append(f"{c.id}: 함정(traps)은 결함이 없는 대조군에만 둘 수 있음")
+        tseen: set[str] = set()
+        for t in c.traps:
+            if t.id in tseen:
+                problems.append(f"{c.id}.{t.id}: 중복된 trap id")
+            tseen.add(t.id)
+            if not t.match_any:
+                problems.append(f"{c.id}.{t.id}: match_any 가 비어 있음")
+            for rx in t.match_any:
+                try:
+                    re.compile(rx)
+                except re.error as e:
+                    problems.append(f"{c.id}.{t.id}: 잘못된 정규식 {rx!r} — {e}")
     if not any(c.clean for c in cases):
         problems.append("대조군(결함 없는 케이스)이 하나도 없음 — 오탐률을 측정할 수 없음")
     if not any(not c.clean for c in cases):

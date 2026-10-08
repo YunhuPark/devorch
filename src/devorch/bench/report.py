@@ -17,6 +17,9 @@ LIMITATIONS = [
     "케이스 수가 적습니다(신뢰구간이 넓음). 구간이 겹치면 차이가 있다고 말할 수 없습니다.",
     "탐지 판정은 정규식 매칭입니다. 올바르게 지적했지만 표현이 달라 놓친 경우(과소)나, 우연히 맞은 경우(과대)가 있을 수 있습니다.",
     "'매칭 안 된 지적'은 오탐이 아니라 *확인 필요* 항목입니다(유효한 추가 지적일 수 있음). 오탐률은 대조군에서만 측정합니다.",
+    "오탐률(엄격) = 대조군에서 MEDIUM 이상 지적이 하나라도 있으면 오탐(정당한 사소한 지적도 포함). "
+    "오탐률(함정) = 사전에 정한 함정(예: 안전한 코드를 SQL 인젝션이라 주장)을 MEDIUM 이상으로 지적한 경우만. 함정은 c11에만 정의돼 있어 표본이 매우 작습니다. "
+    "함정 기준은 2026-10-08 풀 실행 전에 정했습니다(작은 시험에서 엄격 기준이 정당한 지적까지 오탐으로 센 것을 본 뒤). 함정 정규식은 휴리스틱입니다.",
     "LLM 출력은 비결정적입니다. --repeats 로 반복 측정해야 변동을 볼 수 있습니다.",
     "불완전한 리뷰(호출 실패/파싱 실패)는 '탐지 못함'으로 계산합니다(fail-closed).",
     "비용은 provider 단가가 설정된 경우에만 합산되며, 아니면 unknown 입니다.",
@@ -29,6 +32,12 @@ def _pct(x: float) -> str:
 
 def _ci(ci: tuple[float, float]) -> str:
     return f"[{_pct(ci[0])}–{_pct(ci[1])}]"
+
+
+def _trap(s: ModeSummary) -> str:
+    if not s.trap_runs_completed:
+        return "n/a"
+    return f"{s.trap_alarms}/{s.trap_runs_completed} = {_pct(s.trap_rate)} {_ci(s.trap_ci)}"
 
 
 def _cost(s: ModeSummary) -> str:
@@ -80,14 +89,15 @@ def render_report(cases: list[Case], results: list[RunResult], modes: list[str],
         "",
         "## 요약 (95% Wilson 신뢰구간)",
         "",
-        "| 모드 | 탐지율 | 오탐률(대조군) | 불완전 리뷰 | 매칭 안 된 지적 | 토큰(입력/출력) | 비용 | 평균 지연(s) |",
-        "|---|---|---|---|---|---|---|---|",
+        "| 모드 | 탐지율 | 오탐률(엄격) | 오탐률(함정) | 불완전 리뷰 | 매칭 안 된 지적 | 토큰(입력/출력) | 비용 | 평균 지연(s) |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     sums = {m: summarize(cases, results, m) for m in modes}
     for m, s in sums.items():
         lines.append(
             f"| {m} | {s.detected}/{s.defect_runs} = {_pct(s.detection_rate)} {_ci(s.detection_ci)} "
             f"| {s.false_positives}/{s.clean_runs_completed} = {_pct(s.fp_rate)} {_ci(s.fp_ci)} "
+            f"| {_trap(s)} "
             f"| {s.incomplete}/{s.runs} | {s.unmatched} | {s.input_tokens:,} / {s.output_tokens:,} | {_cost(s)} | {s.mean_latency_s:.2f} |"
         )
     cats = sorted({k for s in sums.values() for k in s.by_category})
@@ -115,7 +125,7 @@ def render_report(cases: list[Case], results: list[RunResult], modes: list[str],
         if not r.completed:
             res = "⚠ 불완전"
         elif c.clean:
-            res = "오탐" if r.false_positive else "정상(오탐 없음)"
+            res = ("엄격 오탐, 함정 오탐" if r.trap_alarm else "엄격 오탐") if r.false_positive else "정상(오탐 없음)"
         else:
             res = ", ".join(f"{'✔' if d.id in r.detected else '✘'} {d.id}" for d in c.defects)
         lines.append(f"| {r.case_id} | {r.mode}#{r.repeat} | {res} |")

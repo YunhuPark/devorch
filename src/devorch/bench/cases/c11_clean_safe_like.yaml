@@ -22,6 +22,15 @@ files:
               params.append(f"%{name}%")
           cur = conn.execute(query, params)
           return cur.fetchall()
+traps:
+  - id: false_sqli_alarm
+    description: 파라미터 바인딩을 쓰는 안전한 쿼리를 SQL 인젝션 / 문자열 연결·f-string 으로 만든 쿼리라고 주장
+    match_any:
+      - "sql\\s*인젝션"
+      - "sql\\s*injection"
+      - "f-?string"
+      - "문자열\\s*(연결|포맷팅|결합|보간)"
+      - "string\\s*(concatenation|formatting|interpolation)"
 notes: >-
   f-string 이 보이지만 값은 바인딩 파라미터로만 전달됨 — SQL 인젝션 아님. 오탐 여부를 보는 케이스.
   [개정 2026-10-08] 첫 실측(Claude 단일 리뷰어)에서 "이름만으로 검색할 수 없다"는 지적이 MEDIUM 으로 나와 오탐 1건으로 집계됐다.

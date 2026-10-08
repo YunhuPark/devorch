@@ -4,7 +4,7 @@ import pytest
 from gitutil import run_git
 from typer.testing import CliRunner
 
-from devorch.bench.cases import Case, Defect, FileChange, build_diff, load_cases, validate_cases
+from devorch.bench.cases import Case, Defect, FileChange, Trap, build_diff, load_cases, validate_cases
 from devorch.bench.metrics import judge, paired_comparison, score_run, sign_test, summarize, wilson
 from devorch.bench.mock import heuristic_provider
 from devorch.bench.runner import expected_calls, review_steps, run_benchmark
@@ -191,3 +191,84 @@ def test_cli_claude_only_needs_just_the_claude_key(tmp_path, monkeypatch):
     # with the flag: only claude is needed, so the provider check passes; decline at the confirm prompt
     r = runner.invoke(app, ["bench", "run", "-p", str(tmp_path), "--claude-only"], input="n\n")
     assert r.exit_code == 1 and "provider: claude)" in r.output and "사용할 수 없습니다" not in r.output
+
+
+# ---- trap-based false alarms (decided before the full run; the strict rule is still reported) ----------
+C11 = next(c for c in CASES if c.id == "c11_clean_safe_like")
+
+
+def test_only_c11_declares_a_trap_and_traps_live_on_clean_cases_only():
+    assert [c.id for c in CASES if c.traps] == ["c11_clean_safe_like"]
+    assert all(c.clean for c in CASES if c.traps)
+    bad = Case(id="x", title="", task="", files={"a.py": FileChange(before="x\n", after="y\n")},
+               defects=[Defect(id="d", category="c", description="", match_any=["x"])],
+               traps=[Trap(id="t", description="", match_any=["y"])])
+    assert any("함정" in p and "결함" in p for p in validate_cases([bad]))
+    broken = Case(id="y", title="", task="", files={"a.py": FileChange(before="x\n", after="y\n")}, traps=[Trap(id="t", description="", match_any=["("])])
+    assert any("잘못된 정규식" in p for p in validate_cases([broken]))
+
+
+@pytest.mark.parametrize(
+    "title,detail",
+    [
+        ("SQL 인젝션 취약점", "name 이 쿼리에 직접 삽입됨"),
+        ("SQL injection via LIKE clause", ""),
+        ("f-string 으로 쿼리를 구성함", "값이 검증 없이 들어감"),
+        ("문자열 연결로 쿼리를 만들고 있음", ""),
+        ("query built with string interpolation", ""),
+    ],
+)
+def test_c11_trap_catches_the_intended_false_alarm(title, detail):
+    r = score_run(C11, "single", 0, [f("high", title, detail)], True)
+    assert r.trap_alarm and r.false_positive
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "이름의 LIKE 와일드카드가 필터를 무력화할 수 있음",  # the real finding that tripped the strict rule on 2026-10-08
+        "이름에 포함된 LIKE 와일드카드가 필터 조건을 바꿉니다",
+        "새 기능에 대한 테스트 부재",
+    ],
+)
+def test_legitimate_nits_are_not_trap_alarms_even_at_medium_or_high(title):
+    r = score_run(C11, "single", 0, [f("medium", title), f("high", title)], True)
+    assert not r.trap_alarm and r.false_positive  # still a strict false positive, never hidden
+
+
+def test_trap_needs_medium_or_higher_and_a_completed_review():
+    sqli = "SQL 인젝션 취약점"
+    assert not score_run(C11, "single", 0, [f("low", sqli), f("info", sqli)], True).trap_alarm
+    assert not score_run(C11, "single", 0, [f("critical", sqli)], False).trap_alarm  # incomplete review: nothing counted
+    assert score_run(C11, "single", 0, [f("medium", sqli)], True).trap_alarm
+
+
+def test_cases_without_traps_never_raise_trap_alarms_and_are_excluded_from_the_trap_rate():
+    c09 = next(c for c in CASES if c.id == "c09_clean_refactor")
+    r = score_run(c09, "single", 0, [f("critical", "SQL 인젝션 취약점")], True)
+    assert r.false_positive and not r.trap_alarm
+    s = summarize(CASES, [r, score_run(C11, "single", 0, [f("medium", "SQL 인젝션 취약점")], True)], "single")
+    assert (s.trap_alarms, s.trap_runs_completed) == (1, 1) and s.clean_runs_completed == 2  # c09 is not a trap run
+    empty = summarize(CASES, [r], "single")
+    assert empty.trap_runs_completed == 0 and empty.trap_rate == 0.0
+
+
+def test_report_shows_both_rates_and_labels_each_clean_case():
+    from devorch.bench.report import render_report
+
+    res = [
+        score_run(C11, "single", 0, [f("medium", "이름의 LIKE 와일드카드가 필터를 무력화할 수 있음")], True),
+        score_run(C11, "multi", 0, [f("high", "SQL 인젝션 취약점")], True),
+        score_run(next(c for c in CASES if c.id == "c10_clean_tests_docs"), "single", 0, [], True),
+    ]
+    text = render_report(CASES, res, ["single", "multi"], mock=False, repeats=1)
+    assert "오탐률(엄격)" in text and "오탐률(함정)" in text
+    assert "엄격 오탐" in text and "엄격 오탐, 함정 오탐" in text and "정상" in text
+
+
+def test_report_says_n_a_when_no_trap_case_completed():
+    from devorch.bench.report import render_report
+
+    res = [score_run(next(c for c in CASES if c.id == "c10_clean_tests_docs"), "single", 0, [], True)]
+    text = render_report(CASES, res, ["single"], mock=False, repeats=1)
+    assert "오탐률(함정)" in text and "n/a" in text
