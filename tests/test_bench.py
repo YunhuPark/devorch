@@ -158,6 +158,7 @@ def test_cli_mock_run_writes_files_with_banner(tmp_path):
     report = (dirs[0] / "report.md").read_text(encoding="utf-8")
     assert "MOCK — harness check only" in report and "## 한계" in report
     data = json.loads((dirs[0] / "results.json").read_text(encoding="utf-8"))
+    assert all("usage" in r for r in data["results"]) and "input_tokens" in data["summaries"]["single"]
     assert data["mock"] is True and len(data["results"]) == 4
 
 

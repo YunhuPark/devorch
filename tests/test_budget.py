@@ -196,6 +196,43 @@ def test_service_refuses_review_before_spending_when_a_provider_is_unpriced(tmp_
     assert openai.calls == []
 
 
+# ---- token usage is recorded even without prices -------------------------------------------------
+async def test_usage_accumulates_per_provider_even_when_unpriced():
+    openai = FakeProvider("openai", ["[]"], priced=False)
+    run = make_run()
+    reg = registry(openai=openai)
+    for _ in range(2):
+        await call_provider(run, reg, AuditLogger(None), STEP, LLMRequest(role="review", prompt="x"))
+    assert run.usage == {"openai": {"calls": 2, "input_tokens": 200, "output_tokens": 100}}
+    assert run.cost_unknown  # tokens are known, the cost is not
+
+
+async def test_a_failed_call_records_no_tokens():
+    class Boom(FakeProvider):
+        async def generate(self, request):
+            raise RuntimeError("HTTP 400")
+
+    run = make_run()
+    with pytest.raises(RuntimeError):
+        await call_provider(run, registry(openai=Boom("openai", ["[]"])), AuditLogger(None), STEP, LLMRequest(role="review", prompt="x"))
+    assert run.usage == {}
+
+
+async def test_benchmark_results_and_report_carry_tokens(tmp_path):
+    from devorch.bench.metrics import summarize
+    from devorch.bench.runner import run_benchmark
+
+    cases = load_cases()[:3]
+    reg = registry(openai=FakeProvider("openai", ["[]"], priced=False))
+    results = await run_benchmark(cases, Policy(), reg, ["single"])
+    assert all(r.usage == {"openai": {"calls": 1, "input_tokens": 100, "output_tokens": 50}} for r in results)
+    assert all(r.to_dict()["usage"]["openai"]["input_tokens"] == 100 for r in results)
+    s = summarize(cases, results, "single")
+    assert (s.input_tokens, s.output_tokens) == (300, 150) and s.cost_unknown
+    text = render_report(cases, results, ["single"], mock=False, repeats=1)
+    assert "토큰(입력/출력)" in text and "300 / 150" in text
+
+
 # ---- benchmark report: failures must be visible ---------------------------------------------------
 CASES = load_cases()[:2]
 CREDIT_ERR = (

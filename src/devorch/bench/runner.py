@@ -55,7 +55,7 @@ async def run_case(case: Case, mode: str, repeat: int, policy: Policy, providers
     return score_run(
         case, mode, repeat, findings, complete,
         cost_usd=run.total_cost_usd, cost_unknown=run.cost_unknown, latency_s=latency, notes=run.notes,
-        models=dict(run.models),
+        models=dict(run.models), usage={p: dict(u) for p, u in run.usage.items()},
     )
 
 

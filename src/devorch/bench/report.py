@@ -80,15 +80,15 @@ def render_report(cases: list[Case], results: list[RunResult], modes: list[str],
         "",
         "## 요약 (95% Wilson 신뢰구간)",
         "",
-        "| 모드 | 탐지율 | 오탐률(대조군) | 불완전 리뷰 | 매칭 안 된 지적 | 비용 | 평균 지연(s) |",
-        "|---|---|---|---|---|---|---|",
+        "| 모드 | 탐지율 | 오탐률(대조군) | 불완전 리뷰 | 매칭 안 된 지적 | 토큰(입력/출력) | 비용 | 평균 지연(s) |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     sums = {m: summarize(cases, results, m) for m in modes}
     for m, s in sums.items():
         lines.append(
             f"| {m} | {s.detected}/{s.defect_runs} = {_pct(s.detection_rate)} {_ci(s.detection_ci)} "
             f"| {s.false_positives}/{s.clean_runs_completed} = {_pct(s.fp_rate)} {_ci(s.fp_ci)} "
-            f"| {s.incomplete}/{s.runs} | {s.unmatched} | {_cost(s)} | {s.mean_latency_s:.2f} |"
+            f"| {s.incomplete}/{s.runs} | {s.unmatched} | {s.input_tokens:,} / {s.output_tokens:,} | {_cost(s)} | {s.mean_latency_s:.2f} |"
         )
     cats = sorted({k for s in sums.values() for k in s.by_category})
     if cats:

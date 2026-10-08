@@ -126,4 +126,5 @@ def _summary_dict(s) -> dict:
         "false_positives": s.false_positives, "fp_rate": s.fp_rate, "fp_ci": s.fp_ci,
         "incomplete": s.incomplete, "unmatched": s.unmatched, "cost_usd": s.cost_usd,
         "cost_unknown": s.cost_unknown, "mean_latency_s": s.mean_latency_s,
+        "input_tokens": s.input_tokens, "output_tokens": s.output_tokens,
     }

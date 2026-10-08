@@ -92,6 +92,10 @@ async def call_provider(
         run.total_cost_usd += resp.cost_usd
     if resp.model:
         run.models[step.provider] = resp.model
+    u = run.usage.setdefault(step.provider, {"calls": 0, "input_tokens": 0, "output_tokens": 0})
+    u["calls"] += 1
+    u["input_tokens"] += resp.input_tokens
+    u["output_tokens"] += resp.output_tokens
     audit.log(
         run.id,
         "llm_call",

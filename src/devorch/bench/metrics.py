@@ -69,6 +69,15 @@ class RunResult:
     latency_s: float = 0.0
     notes: list[str] = field(default_factory=list)
     models: dict[str, str] = field(default_factory=dict)  # provider -> model id that answered
+    usage: dict[str, dict[str, int]] = field(default_factory=dict)  # provider -> calls / input_tokens / output_tokens
+
+    @property
+    def input_tokens(self) -> int:
+        return sum(u.get("input_tokens", 0) for u in self.usage.values())
+
+    @property
+    def output_tokens(self) -> int:
+        return sum(u.get("output_tokens", 0) for u in self.usage.values())
 
     def to_dict(self) -> dict:
         return {
@@ -83,6 +92,7 @@ class RunResult:
             "cost_unknown": self.cost_unknown,
             "latency_s": round(self.latency_s, 3),
             "models": self.models,
+            "usage": self.usage,
             "notes": self.notes,
             "findings": [f.model_dump(mode="json") for f in self.findings],
         }
@@ -109,6 +119,8 @@ class ModeSummary:
     cost_unknown: bool
     mean_latency_s: float
     by_category: dict[str, tuple[int, int]]  # category -> (detected, total)
+    input_tokens: int = 0
+    output_tokens: int = 0
 
     @property
     def detection_rate(self) -> float:
@@ -154,6 +166,8 @@ def summarize(cases: list[Case], results: list[RunResult], mode: str) -> ModeSum
         cost_unknown=any(r.cost_unknown for r in rs),
         mean_latency_s=(sum(r.latency_s for r in rs) / len(rs)) if rs else 0.0,
         by_category={k: (v[0], v[1]) for k, v in cats.items()},
+        input_tokens=sum(r.input_tokens for r in rs),
+        output_tokens=sum(r.output_tokens for r in rs),
     )
 
 

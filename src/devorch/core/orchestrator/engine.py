@@ -64,6 +64,9 @@ class WorkflowRun(BaseModel):
     total_cost_usd: float = 0.0
     cost_unknown: bool = False
     models: dict[str, str] = Field(default_factory=dict)  # provider -> model id actually used
+    # provider -> {"calls", "input_tokens", "output_tokens"}; kept even when no prices are configured,
+    # so a cost can be computed later from the tokens.
+    usage: dict[str, dict[str, int]] = Field(default_factory=dict)
     branch: str | None = None
     worktree: str | None = None
     commit: str | None = None
