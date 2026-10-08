@@ -10,6 +10,7 @@ from devorch.audit import AuditLogger
 from devorch.core.evaluator.evaluator import parse_findings
 from devorch.models import Finding, RoutingStep
 from devorch.providers.base import LLMRequest, LLMResponse, ProviderRegistry
+from devorch.security.secret_redactor import redact
 
 if TYPE_CHECKING:
     from devorch.core.orchestrator.engine import WorkflowRun
@@ -39,6 +40,24 @@ def build_review_prompt(run: "WorkflowRun", step: RoutingStep) -> str:
 
 class BudgetExceeded(RuntimeError):
     """The task's spend cap (``limits.max_cost_usd``) is reached, or can't be checked. No further LLM call is made."""
+
+
+def describe_error(exc: BaseException, limit: int = 300) -> str:
+    """One line for a failed provider call: type, message, and — when the SDK exposes them — HTTP status and
+    the start of the response body (SDK messages sometimes drop the body, e.g. a bodiless 400). Redacted."""
+    text = f"{type(exc).__name__}: {exc}"
+    status = getattr(exc, "status_code", None)
+    body = ""
+    try:
+        raw = getattr(getattr(exc, "response", None), "text", None)
+        body = raw.strip() if isinstance(raw, str) else ""
+    except Exception:  # an unread streaming body, etc. — the description must never fail
+        body = ""
+    if status is not None and f"{status}" not in text:
+        text += f" [HTTP {status}]"
+    if body and body[:60] not in text:
+        text += f" | 응답 본문: {body[:limit]}"
+    return redact(text)
 
 
 def budget_preflight(providers: ProviderRegistry, names: Iterable[str], max_cost_usd: float | None) -> str | None:
@@ -139,8 +158,8 @@ async def run_reviews(
     completed: list[str] = []
     for step, result in zip(steps, results):
         if isinstance(result, BaseException):
-            run.notes.append(f"{label}{step.role}({step.provider}) 호출 실패: {type(result).__name__}: {result}")
-            audit.log(run.id, "review_failed", {"role": step.role, "error": str(result)})
+            run.notes.append(f"{label}{step.role}({step.provider}) 호출 실패: {describe_error(result)}")
+            audit.log(run.id, "review_failed", {"role": step.role, "error": describe_error(result)})
             continue
         parsed, ok = parse_findings(step.provider, step.role, result.text)
         if not ok:

@@ -34,9 +34,14 @@ def build_registry(
             skipped[name] = "config.yaml에 설정 없음"
             continue
         key_env = cfg.get("api_key_env")
-        api_key = env.get(key_env) if key_env else None
+        api_key = (env.get(key_env) or "").strip() if key_env else None
         if not api_key:
             skipped[name] = f"환경변수 {key_env or '(api_key_env 미설정)'} 가 비어 있음"
+            continue
+        if not api_key.isascii() or any(c.isspace() or not c.isprintable() for c in api_key):
+            # A key with stray whitespace / invisible or non-ASCII characters makes the HTTP header malformed, which the
+            # vendors answer with a bodiless 400. Refuse before any call; never print the key itself.
+            skipped[name] = f"환경변수 {key_env} 에 공백·보이지 않는 문자·비ASCII 문자가 섞여 있음 (키를 다시 입력하세요)"
             continue
         model = cfg.get("model") or DEFAULT_MODELS.get(name)
         if not model:

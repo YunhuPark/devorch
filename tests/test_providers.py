@@ -133,6 +133,19 @@ def test_factory_registers_only_usable_providers_and_explains_the_rest():
     assert "GEMINI_API_KEY" in skipped["gemini"]         # model present but no key
 
 
+def test_factory_strips_surrounding_whitespace_from_keys():
+    reg, skipped = build_registry(CONFIG, env={"ANTHROPIC_API_KEY": "  k1\r\n", "GEMINI_API_KEY": "\tk3 "})
+    assert reg.names() == ["claude", "gemini"] and not any(n in skipped for n in ("claude", "gemini"))
+    assert reg.get("gemini")._client is not None  # constructed with the stripped key (SDK builds the client)
+
+
+@pytest.mark.parametrize("bad", ["sk-abc def", "sk-abc\ndef", "sk-한글키", "sk-abc​def"])
+def test_factory_refuses_keys_with_inner_whitespace_or_non_ascii_and_never_echoes_them(bad):
+    reg, skipped = build_registry(CONFIG, env={"ANTHROPIC_API_KEY": bad})
+    assert reg.names() == [] and "claude" in skipped
+    assert "공백" in skipped["claude"] and bad not in skipped["claude"] and "abc" not in skipped["claude"]
+
+
 def test_factory_prices_and_model_default():
     reg, _ = build_registry(CONFIG, env={"GEMINI_API_KEY": "k", "ANTHROPIC_API_KEY": "k"})
     assert reg.get("gemini").prices == {"input_per_mtok": 1.0, "output_per_mtok": 2.0}

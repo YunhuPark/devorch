@@ -196,6 +196,54 @@ def test_service_refuses_review_before_spending_when_a_provider_is_unpriced(tmp_
     assert openai.calls == []
 
 
+# ---- failure descriptions keep the HTTP status and body, redacted -----------------------------------
+def test_describe_error_adds_status_and_body_when_the_sdk_message_drops_them():
+    from types import SimpleNamespace as NS
+
+    from devorch.core.orchestrator.review import describe_error
+
+    class BadRequestError(Exception):
+        status_code = 400
+
+    e = BadRequestError("Error code: 400")
+    e.response = NS(text='{"error": {"message": "Invalid header value", "key": "sk-abcdefghijklmnopqrstuvwxyz0123"}}')
+    out = describe_error(e)
+    assert "BadRequestError" in out and "Invalid header value" in out and "응답 본문" in out
+    assert "sk-abcdefghijklmnopqrstuvwxyz0123" not in out  # redacted
+
+
+def test_describe_error_never_fails_and_does_not_duplicate_a_body_already_in_the_message():
+    from types import SimpleNamespace as NS
+
+    from devorch.core.orchestrator.review import describe_error
+
+    class Weird(Exception):
+        @property
+        def response(self):
+            raise RuntimeError("body not read")
+
+    assert describe_error(Weird("boom")) == "Weird: boom"
+    e = Exception("Error code: 400 - {'message': 'bad'}")
+    e.response = NS(text="{'message': 'bad'}")
+    assert describe_error(e).count("bad") == 1
+
+
+async def test_a_failed_review_note_carries_the_response_body():
+    class Boom(FakeProvider):
+        async def generate(self, request):
+            err = RuntimeError("Error code: 400")
+            err.status_code = 400
+            err.response = type("R", (), {"text": "<html>Error 400 (Bad Request)</html>"})()
+            raise err
+
+    run = make_run()
+    findings, completed = await run_reviews(run, [STEP], registry(openai=Boom("openai", ["[]"])), AuditLogger(None))
+    assert completed == []
+    (note,) = [n for n in run.notes if "호출 실패" in n]
+    assert "Error code: 400" in note and "응답 본문: <html>Error 400 (Bad Request)</html>" in note
+    assert note.count("HTTP 400") == 0  # the status is already in the message, so it isn't repeated
+
+
 # ---- token usage is recorded even without prices -------------------------------------------------
 async def test_usage_accumulates_per_provider_even_when_unpriced():
     openai = FakeProvider("openai", ["[]"], priced=False)
