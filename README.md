@@ -32,10 +32,10 @@ pytest
 | 상태 머신 + 워크플로 엔진 (독립 리뷰 병렬, 수정 라운드 `max_retries`, 승인 게이트) | ✅ |
 | Audit log (JSONL, 시크릿 마스킹), 명령 allowlist, 경로 탈출 방지 | ✅ |
 | Provider 인터페이스 + MockProvider | ✅ |
-| 실제 LLM Provider 어댑터 (Anthropic Messages / OpenAI Responses / Gemini generate_content) | ✅ 단위 테스트 완료. **Anthropic만** 실제 호출 성공을 확인(벤치마크 11회) — **OpenAI·Gemini는 실제 호출 미검증** |
+| 실제 LLM Provider 어댑터 (Anthropic Messages / OpenAI Responses / Gemini generate_content) | ✅ 단위 테스트 완료. 실제 호출 성공 확인: Anthropic(`claude-sonnet-5-5`, 11회), OpenAI(`gpt-6-sol`)·Gemini(`gemini-3.6-flash`)(작은 벤치마크 8회). **미검증:** OpenAI 추론 토큰이 `usage.output_tokens`에 포함되는지(청구서와 대조 필요), 실패·재시도 경로의 실제 동작 |
 | 코드 적용기(임시 git worktree) / 테스트 러너(allowlist) / 브랜치 커밋 — `run --apply` | ✅ 임시 git 저장소 E2E 테스트 완료 (실제 LLM이 만든 diff로는 미검증) |
 | MCP 서버 (stdio, 도구 8개 + 리소스 3개), `devorch approve` / `tasks` | ✅ 인메모리 테스트 + **Windows에서 실제 stdio 하위 프로세스로** 분석→리뷰→테스트→브랜치 커밋, 승인 필요 작업의 거부까지 검증(`tests/test_mcp_stdio.py`, mock provider). **Claude Code 등 실제 클라이언트 연결은 미검증** |
-| Benchmark (`devorch bench`): 시드 결함 11케이스, Wilson 신뢰구간, 쌍체 부호검정 | ✅ 하네스·채점은 mock으로 검증. 실제 LLM은 **Claude 단일 리뷰어(`--claude-only`) 1회 실행만** 있음 — 표본이 작아 결론을 내릴 수 없고, GPT·Gemini 교차 검증과 single 대 multi 비교는 **미실행** |
+| Benchmark (`devorch bench`): 시드 결함 11케이스, Wilson 신뢰구간, 쌍체 부호검정 | ✅ 하네스·채점은 mock으로 검증. 실제 LLM 실행: Claude 단일 리뷰어(`--claude-only`, 11케이스 1회)와 GPT·Gemini single/multi 시험(2케이스 1회, 8호출). 표본이 작아 **결론을 낼 수 없고**, 전체 케이스의 single 대 multi 비교는 **미실행** |
 | Docker 샌드박스 (테스트 단계, `devorch sandbox`) | ✅ 가짜 docker 실행파일로 인자·타임아웃·fail-closed 검증 — **실제 컨테이너 실행은 이 환경에 daemon이 없어 미검증** |
 | Dashboard (`devorch dashboard`, 읽기 전용 로컬 웹 UI) | ✅ API 테스트 + 실제 Chromium 렌더링/XSS 확인 |
 | Cost Optimizer, Adaptive Routing | ⏳ 고도화 (실측 비용·품질 데이터가 먼저 필요) |
