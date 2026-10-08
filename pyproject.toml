@@ -31,3 +31,4 @@ devorch = ["bench/cases/*.yaml"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["tests"]  # tests share helper modules (gitutil.py)

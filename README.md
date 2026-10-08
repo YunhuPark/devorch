@@ -34,7 +34,7 @@ pytest
 | Provider 인터페이스 + MockProvider | ✅ |
 | 실제 LLM Provider 어댑터 (Anthropic Messages / OpenAI Responses / Gemini generate_content) | ✅ 단위 테스트 완료. **Anthropic만** 실제 호출 성공을 확인(벤치마크 11회) — **OpenAI·Gemini는 실제 호출 미검증** |
 | 코드 적용기(임시 git worktree) / 테스트 러너(allowlist) / 브랜치 커밋 — `run --apply` | ✅ 임시 git 저장소 E2E 테스트 완료 (실제 LLM이 만든 diff로는 미검증) |
-| MCP 서버 (stdio, 도구 8개 + 리소스 3개), `devorch approve` / `tasks` | ✅ 인메모리·실제 stdio 프로세스로 검증 (Claude Code 등 실제 클라이언트 연결은 미검증) |
+| MCP 서버 (stdio, 도구 8개 + 리소스 3개), `devorch approve` / `tasks` | ✅ 인메모리 테스트 + **Windows에서 실제 stdio 하위 프로세스로** 분석→리뷰→테스트→브랜치 커밋, 승인 필요 작업의 거부까지 검증(`tests/test_mcp_stdio.py`, mock provider). **Claude Code 등 실제 클라이언트 연결은 미검증** |
 | Benchmark (`devorch bench`): 시드 결함 11케이스, Wilson 신뢰구간, 쌍체 부호검정 | ✅ 하네스·채점은 mock으로 검증. 실제 LLM은 **Claude 단일 리뷰어(`--claude-only`) 1회 실행만** 있음 — 표본이 작아 결론을 내릴 수 없고, GPT·Gemini 교차 검증과 single 대 multi 비교는 **미실행** |
 | Docker 샌드박스 (테스트 단계, `devorch sandbox`) | ✅ 가짜 docker 실행파일로 인자·타임아웃·fail-closed 검증 — **실제 컨테이너 실행은 이 환경에 daemon이 없어 미검증** |
 | Dashboard (`devorch dashboard`, 읽기 전용 로컬 웹 UI) | ✅ API 테스트 + 실제 Chromium 렌더링/XSS 확인 |
@@ -76,7 +76,7 @@ src/devorch/
 ├── cli/main.py
 ├── config.py  audit.py  models.py
 bench/          # (src/devorch/bench) 케이스·채점·러너·리포트, cases/*.yaml
-tests/              # 219 tests + 1 skip (Windows에서 symlink 권한이 없으면 skip)
+tests/              # 224 tests + 1 skip (Windows에서 symlink 권한이 없으면 skip)
 examples/demo-spring/   # 영향 분석 시연용 작은 Java 프로젝트
 ```
 
@@ -157,7 +157,8 @@ devorch bench run --mode both --repeats 3        # 실제 LLM: 호출 횟수 확
 - **`--mock` 결과에는 항상 경고 배너가 붙으며 실제 성능이 아닙니다.**
 - 리포트 맨 위에 불완전 리뷰(호출/파싱 실패)가 있으면 경고와 실패 사유가 나오고, 전부 실패하면 "성능 수치가 아님"이라고 표시합니다. 사용한 모델 ID도 기록됩니다.
 - 호출별 입력/출력 **토큰 수는 단가가 없어도 기록**됩니다(`results.json`의 `usage`, 리포트의 토큰 열). 단가를 나중에 알게 되면 토큰 × 단가로 비용을 계산할 수 있습니다. 호출이 실패한 경우는 토큰을 세지 않습니다.
-- 실측은 아직 Claude 단일 리뷰어 1회뿐입니다(탐지 9/9, 대조군 오탐 1/3). 구간이 넓고 대조군 `c11`에는 정당한 지적 거리가 있어 오탐 수치는 해석에 주의가 필요합니다.
+- 실측은 아직 Claude 단일 리뷰어 1회뿐입니다(탐지 9/9, 대조군 오탐 1/3). 구간이 넓습니다. 그 오탐 1건은 대조군 `c11`의 과제 문구가 모호해서 정당한 지적일 수 있었고,
+  그래서 `c11`의 문구를 개정했습니다(2026-10-08, 케이스 파일의 notes 참고). **개정 전 실행과 오탐률을 직접 비교하지 마세요.**
 - 한계: 케이스가 적고, 탐지 판정이 정규식이며, LLM 출력이 비결정적입니다. 자체 케이스를 `--cases-dir`로 추가할 수 있습니다.
 
 ## Docker 샌드박스 (테스트 단계)

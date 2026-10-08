@@ -1,6 +1,6 @@
 id: c11_clean_safe_like
 title: 안전한 파라미터화 LIKE 검색 (오탐 유도 대조군)
-task: 사용자 검색 API에 이름으로 필터링하는 기능을 추가해줘
+task: 사용자 검색 API(search_users)에서 이메일로 찾은 결과를, 이름으로 한 번 더 걸러내는 선택 옵션을 추가해줘
 files:
   app/users.py:
     before: |
@@ -22,4 +22,8 @@ files:
               params.append(f"%{name}%")
           cur = conn.execute(query, params)
           return cur.fetchall()
-notes: f-string 이 보이지만 값은 바인딩 파라미터로만 전달됨 — SQL 인젝션 아님. 오탐 여부를 보는 케이스.
+notes: >-
+  f-string 이 보이지만 값은 바인딩 파라미터로만 전달됨 — SQL 인젝션 아님. 오탐 여부를 보는 케이스.
+  [개정 2026-10-08] 첫 실측(Claude 단일 리뷰어)에서 "이름만으로 검색할 수 없다"는 지적이 MEDIUM 으로 나와 오탐 1건으로 집계됐다.
+  원래 과제 문구("이름으로 필터링")가 모호해서 정당한 지적일 수 있었으므로, 이메일 결과를 이름으로 추가 필터링하는 것이
+  의도임을 문구에 명시했다. 코드와 의도(SQL 인젝션 함정)는 그대로. 이 개정 이전 실행과 오탐률을 직접 비교하지 말 것.
