@@ -23,6 +23,7 @@ from devorch.core.analyzer.task_analyzer import analyze_task
 from devorch.core.evaluator.evaluator import evaluate
 from devorch.core.orchestrator.review import budget_preflight, build_context, call_provider, run_reviews
 from devorch.core.orchestrator.state import State, check_transition
+from devorch.core.router.cost_model import prices_from_registry
 from devorch.core.router.model_router import plan_routing
 from devorch.models import (
     Evaluation,
@@ -135,7 +136,7 @@ class WorkflowEngine:
         run.analysis = analyze_task(run.task_text)
         run.impact = analyze_impact(self.root, run.analysis)
         run.risk = assess_risk(run.analysis, run.impact)
-        run.plan = plan_routing(run.analysis, run.risk, run.impact, self.policy)
+        run.plan = plan_routing(run.analysis, run.risk, run.impact, self.policy, prices=prices_from_registry(self.providers))
         self._move(run, State.PLANNED, risk=run.risk.level.value, steps=[(s.role, s.provider) for s in run.plan.steps])
 
         plan = run.plan

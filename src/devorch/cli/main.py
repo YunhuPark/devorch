@@ -19,6 +19,7 @@ from devorch.core.execution.executor import ExecutionError, Executor
 from devorch.core.execution.patch import extract_diff
 from devorch.core.orchestrator.engine import WorkflowEngine, WorkflowRun
 from devorch.core.orchestrator.review import budget_preflight
+from devorch.core.router.cost_model import merge_prices, prices_from_config, prices_from_registry
 from devorch.core.router.model_router import plan_routing
 from devorch.providers.base import ProviderRegistry
 from devorch.providers.factory import build_registry
@@ -67,13 +68,14 @@ def analyze(
     try:
         analysis = analyze_task(task)
         policy = load_policy(path)
+        prices = prices_from_config(load_config(path))
     except ValueError as e:
         typer.echo(f"오류: {e}", err=True)
         raise typer.Exit(2)
 
     impact = analyze_impact(path, analysis)
     risk = assess_risk(analysis, impact)
-    plan = plan_routing(analysis, risk, impact, policy)
+    plan = plan_routing(analysis, risk, impact, policy, prices=prices)
 
     if as_json:
         typer.echo(
@@ -122,9 +124,10 @@ def analyze(
     lines += [f"      · {r}" for r in plan.approval_reasons]
     lines += [
         f"  - 검증 수준: {plan.verification_level}",
-        f"  - 예상 비용: ~${plan.estimated_cost_usd:.2f} / 예상 시간: ~{plan.estimated_latency_s:.0f}s (기본 추정치)",
+        f"  - 예상 비용: ~${plan.estimated_cost_usd:.3f} / 예상 시간: ~{plan.estimated_latency_s:.0f}s (시간은 기본 추정치)",
     ]
-    lines += [f"  ※ {n}" for n in plan.notes if "추정치" not in n]
+    lines += [f"      · {x.role:<14} {x.provider:<7} ${x.usd:.4f}  ({x.basis})" for x in plan.cost_breakdown]
+    lines += [f"  ※ {n}" for n in plan.notes]
     typer.echo("\n".join(lines))
 
 
@@ -189,7 +192,7 @@ def run(
     else:
         registry, skipped = build_registry(config)
         impact = analyze_impact(path, analysis)
-        plan = plan_routing(analysis, assess_risk(analysis, impact), impact, policy)
+        plan = plan_routing(analysis, assess_risk(analysis, impact), impact, policy, prices=merge_prices(prices_from_config(config), prices_from_registry(registry)))
         needed = sorted({s.provider for s in plan.steps})
         missing = [n for n in needed if n not in registry.names()]
         if missing:
@@ -202,7 +205,11 @@ def run(
             typer.echo(f"오류: {problem}", err=True)
             raise typer.Exit(2)
         typer.echo(f"위험도 {plan.level.value.upper()} — " + ", ".join(f"{s.role}={s.provider}" for s in plan.steps))
-        typer.echo(f"실제 LLM API를 호출합니다 (예상 ~${plan.estimated_cost_usd:.2f}, 기본 추정치 · 수정 라운드마다 반복될 수 있음).")
+        bases = sorted({x.basis for x in plan.cost_breakdown})
+        typer.echo(
+            f"실제 LLM API를 호출합니다 (예상 ~${plan.estimated_cost_usd:.3f}; 근거: {', '.join(bases)}. "
+            "구현 단계는 실측이 없고, diff 크기는 가정이며, 수정 라운드마다 반복될 수 있음)."
+        )
         if policy.limits.max_cost_usd is not None:
             typer.echo(f"작업당 비용 상한: ${policy.limits.max_cost_usd} (호출 사이에서 검사 — 병렬로 진행 중인 호출만큼은 넘을 수 있음).")
         if not yes and not typer.confirm("진행할까요?"):

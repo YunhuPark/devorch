@@ -78,11 +78,14 @@ class Policy(BaseModel):
             "mvn test", "gradle test", "./gradlew test",
         ]
     )
-    # Rough per-call planning estimates, NOT measured values. Override with real numbers.
+    # Planning estimates. "cost_usd" is the flat per-call FALLBACK (unmeasured; ~7-8x too high for reviewer calls on small
+    # diffs) used for the implementation step and for providers without prices; reviewer calls of priced providers are
+    # estimated from tokens x price instead (core/router/cost_model.py). "assumed" holds inputs that are assumptions.
     estimates: dict[str, dict[str, float]] = Field(
         default_factory=lambda: {
             "cost_usd": {"claude": 0.05, "openai": 0.03, "gemini": 0.02},
             "latency_s": {"claude": 40.0, "openai": 25.0, "gemini": 25.0},
+            "assumed": {"diff_chars_per_file": 1500.0},
         }
     )
 

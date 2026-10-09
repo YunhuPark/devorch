@@ -24,8 +24,9 @@ from devorch.core.execution.sandbox import load_sandbox
 from devorch.core.execution.executor import ExecutionError, Executor
 from devorch.core.execution.patch import PatchError, validate_diff
 from devorch.core.orchestrator.engine import WorkflowRun
-from devorch.core.orchestrator.review import budget_preflight, run_reviews
+from devorch.core.orchestrator.review import REVIEWER_SYSTEM, budget_preflight, build_review_prompt, run_reviews
 from devorch.core.orchestrator.state import State
+from devorch.core.router.cost_model import estimate_call, merge_prices, prices_from_config, prices_from_registry
 from devorch.core.router.model_router import plan_routing
 from devorch.git.manager import GitError
 from devorch.models import Finding
@@ -91,6 +92,20 @@ class ControlPlane:
         return cls(root, policy, config, providers, executor, provider_notes=notes)
 
     # ---------------------------------------------------------------- helpers
+    def _prices(self) -> dict[str, dict[str, float]]:
+        """Configured per-Mtok prices; a registered adapter's own prices take precedence over config.yaml."""
+        return merge_prices(prices_from_config(self.config), prices_from_registry(self.providers))
+
+    def _estimate_review(self, record: TaskRecord, steps) -> dict[str, Any]:
+        """Cost of the reviews about to run, from the REAL prompts (so the actual diff size is counted). usd is None if any
+        reviewer has no price — unknown, never 0. Logged so estimates can later be compared with the actual cost."""
+        prices = self._prices()
+        ests = [estimate_call(s.provider, len(REVIEWER_SYSTEM) + len(build_review_prompt(record.run, s)), prices) for s in steps]
+        usd = None if any(e.usd is None for e in ests) else round(sum(e.usd for e in ests), 6)
+        info = {"estimated_usd": usd, "input_tokens": sum(e.input_tokens for e in ests), "output_tokens": sum(e.output_tokens for e in ests), "calls": len(ests)}
+        self._log(record, "review_estimate", **info)
+        return info
+
     def _load(self, task_id: str) -> TaskRecord:
         try:
             return self.store.load(task_id)
@@ -188,7 +203,7 @@ class ControlPlane:
             raise ControlPlaneError(str(e)) from e
         impact = analyze_impact(self.root, analysis)
         risk = assess_risk(analysis, impact)
-        plan = plan_routing(analysis, risk, impact, self.policy)
+        plan = plan_routing(analysis, risk, impact, self.policy, prices=self._prices())
         run = WorkflowRun(task_text=task.strip(), state=State.PLANNED, analysis=analysis, impact=impact, risk=risk, plan=plan)
         record = TaskRecord(run=run)
         self.store.save(record)
@@ -213,6 +228,8 @@ class ControlPlane:
             "approval_reasons": plan.approval_reasons,
             "verification_level": plan.verification_level,
             "estimated_cost_usd": plan.estimated_cost_usd,
+            "cost_breakdown": [line.model_dump() for line in plan.cost_breakdown],
+            "cost_notes": [n for n in plan.notes if n.startswith("비용")],
             "next_step": "작업 트리에서 코드를 구현한 뒤 devorch_request_review 를 호출하세요.",
         }
 
@@ -280,6 +297,7 @@ class ControlPlane:
         required = [s.role for s in steps]
         findings: list[Finding] = []
         completed: list[str] = []
+        estimate = self._estimate_review(record, steps)
         if steps:
             findings, completed = await run_reviews(run, steps, self.providers, self.audit, label=f"review {record.review_rounds}: ", max_cost_usd=cap)
         run.findings = findings
@@ -287,9 +305,9 @@ class ControlPlane:
         record.reviewed_sha = sha
         self.store.save(record)
         self._log(record, "request_review", diff_sha=sha, round=record.review_rounds, summary=run.evaluation.summary)
-        return self._review_result(record, cached=False)
+        return self._review_result(record, cached=False, estimate=estimate)
 
-    def _review_result(self, record: TaskRecord, cached: bool) -> dict[str, Any]:
+    def _review_result(self, record: TaskRecord, cached: bool, estimate: dict[str, Any] | None = None) -> dict[str, Any]:
         run = record.run
         ev = run.evaluation
         assert ev
@@ -312,6 +330,8 @@ class ControlPlane:
             "rounds_used": record.review_rounds,
             "rounds_max": self.policy.limits.max_retries + 1,
             "cost_usd": None if run.cost_unknown else round(run.total_cost_usd, 4),
+            # estimated BEFORE the calls from the real prompt size and the configured prices (None = a reviewer has no price)
+            "estimated_review_cost_usd": estimate["estimated_usd"] if estimate else None,
             "notes": run.notes[-5:],
             "next_step": nxt,
         }

@@ -105,6 +105,15 @@ class RoutingStep(BaseModel):
     purpose: str
 
 
+class CostLine(BaseModel):
+    role: str
+    provider: str
+    usd: float
+    basis: str  # "토큰×단가" | "토큰×단가(미측정 가정)" | "기본 고정값"
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
 class RoutingPlan(BaseModel):
     level: RiskLevel
     steps: list[RoutingStep]
@@ -114,6 +123,7 @@ class RoutingPlan(BaseModel):
     verification_level: str = "BASIC"
     estimated_cost_usd: float = 0.0
     estimated_latency_s: float = 0.0
+    cost_breakdown: list[CostLine] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
 
     @property

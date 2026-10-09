@@ -57,7 +57,11 @@ diff 추출 → 경로 검증 → git worktree add(HEAD 기준) → git apply �
 - 사람 승인이 필요한데 approver가 없으면 실패
 - 계획에 필요한 provider가 등록되지 않았으면 토큰을 쓰기 전에 실패
 - 리뷰어끼리는 서로의 결과를 보지 못함(독립 검증). 수정 라운드에는 *차단* 이슈만 구현 모델에 전달
-- 비용/시간은 `policy.estimates`의 **기본 추정치**이며 실측값이 아님. Provider가 비용을 알려주지 않으면 `unknown`으로 표시
+- **실행 전 예상 비용**: 리뷰어 호출은 `토큰 × 단가`로 계산합니다(단가는 `config.yaml`의 `providers.<name>.input_per_mtok/output_per_mtok`). 계수(문자당 토큰, 호출당 출력 토큰)는 벤치마크 실측으로 맞춘 값이고,
+  다른 구성의 실행에 적용하면 **모드별 합계 비용이 +2~11% 오차**였습니다. 그러나 (1) 작은 diff(약 300 토큰) 기준이고 큰 diff는 **검증되지 않았으며**, (2) 호출 하나의 출력 토큰은 편차가 커서(GPT 36~518, Gemini 241~1,533)
+  개별 호출이 아니라 **합계**에 맞고, (3) 분석 시점에는 diff가 없어 크기를 **가정**(파일당 1,500자)하고(실제 리뷰 직전에는 진짜 diff로 다시 계산해 감사 로그 `mcp:review_estimate`와 결과의 `estimated_review_cost_usd`에 남김),
+  (4) **구현 단계와 단가가 없는 provider는 여전히 기본 고정값**(`policy.estimates.cost_usd`, 실측 없음)이라 전체 예상 비용의 대부분을 이 미측정 값이 차지할 수 있고, (5) claude의 토큰 계수는 측정한 적이 없어 가정값입니다.
+  단가가 하나도 없으면 예전처럼 고정값만 씁니다. 실제 비용은 Provider가 보고한 토큰으로 계산해 감사 로그에 남기며, 단가가 없으면 `unknown`입니다
 - **작업당 비용 상한** `limits.max_cost_usd`(기본 null=무제한): 누적 비용이 상한에 도달하면 다음 LLM 호출을 시작하지 않고(`budget_exceeded` 감사 기록)
   리뷰는 미완료(NOT_READY), 구현 단계면 작업이 FAILED가 됩니다. 상한을 지키려면 쓰는 provider 모두에 `input_per_mtok`/`output_per_mtok`가
   있어야 하며, 없으면 토큰을 쓰기 전에 시작을 거부합니다. 모든 LLM 호출은 토큰 수·호출 비용·누적 비용·상한을 감사 로그에 남깁니다.
@@ -77,7 +81,7 @@ src/devorch/
 ├── cli/main.py
 ├── config.py  audit.py  models.py
 bench/          # (src/devorch/bench) 케이스·채점·러너·리포트, cases/*.yaml
-tests/              # 316 tests + 1 skip (Windows에서 symlink 권한이 없으면 skip)
+tests/              # 338 tests + 1 skip (Windows에서 symlink 권한이 없으면 skip)
 examples/demo-spring/   # 영향 분석 시연용 작은 Java 프로젝트
 ```
 
