@@ -10,6 +10,7 @@ from pathlib import Path
 import typer
 
 from devorch.bench.cases import load_cases, validate_cases
+from devorch.bench.judge import count_judge_calls, judge_results, outcome_to_json, render_judged_report
 from devorch.bench.mock import heuristic_provider
 from devorch.bench.metrics import summarize
 from devorch.bench.report import render_report
@@ -123,6 +124,58 @@ def run_cmd(
     (out_dir / "results.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     typer.echo(report)
     typer.echo(f"\n저장: {out_dir}")
+
+
+@bench_app.command("judge")
+def judge_cmd(
+    results_dir: Path = typer.Argument(..., exists=True, file_okay=False, help="`bench run` 이 저장한 결과 디렉터리 (results.json 이 있는 곳)"),
+    path: Path = typer.Option(Path("."), "--path", "-p", file_okay=False, help="프로젝트 루트(.devorch 설정 위치)"),
+    judge: str = typer.Option("claude", "--judge", help="판정에 쓸 provider: claude | openai | gemini (리뷰어와 다른 회사를 권장)"),
+    cases_dir: Path = typer.Option(None, "--cases-dir"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="호출 확인 생략"),
+    max_total_usd: float = typer.Option(None, "--max-total-usd", min=0.0001, help="판정 비용 합계 상한(USD). 판정자 단가 필요"),
+) -> None:
+    """저장된 벤치마크 결과를 LLM 판정기로 다시 판정한다 (리뷰어는 다시 호출하지 않음). 정규식 판정과 나란히 보고한다."""
+    src = results_dir / "results.json"
+    if not src.exists():
+        typer.echo(f"오류: {src} 가 없습니다.", err=True)
+        raise typer.Exit(2)
+    payload = json.loads(src.read_text(encoding="utf-8"))
+    if payload.get("mock"):
+        typer.echo("오류: --mock 으로 만든 결과는 판정하지 않습니다(가짜 리뷰어의 결과).", err=True)
+        raise typer.Exit(2)
+    if judge not in ("claude", "openai", "gemini"):
+        typer.echo("--judge 는 claude | openai | gemini 중 하나여야 합니다.", err=True)
+        raise typer.Exit(2)
+    cases = _load(cases_dir, None)
+    unknown = sorted({r["case_id"] for r in payload["results"]} - {c.id for c in cases})
+    if unknown:
+        typer.echo(f"오류: 결과에 이 케이스 집합에 없는 케이스가 있습니다: {', '.join(unknown)} (--cases-dir 확인)", err=True)
+        raise typer.Exit(2)
+
+    registry, skipped = build_registry(load_config(path))
+    if judge not in registry.names():
+        typer.echo(f"판정기 provider를 사용할 수 없습니다: {judge}: {skipped.get(judge, '알 수 없음')}", err=True)
+        raise typer.Exit(2)
+    if (problem := budget_preflight(registry, [judge], max_total_usd)) is not None:
+        typer.echo(f"오류: {problem}", err=True)
+        raise typer.Exit(2)
+    calls = count_judge_calls(cases, payload)
+    reviewers = sorted({p for r in payload["results"] for p in (r.get("models") or {})})
+    typer.echo(f"판정 LLM API를 총 {calls}회 호출합니다 (판정기: {judge}). 리뷰어는 다시 호출하지 않습니다. 비용은 호출 후에야 알 수 있습니다.")
+    if judge in reviewers:
+        typer.echo(f"경고: 판정기({judge})가 리뷰어와 같은 회사 모델입니다(자기 선호 편향 가능).")
+    if max_total_usd is not None:
+        typer.echo(f"판정 비용 합계 상한: ${max_total_usd} — 도달하면 나머지는 미판정으로 남깁니다.")
+    if not yes and not typer.confirm("진행할까요?"):
+        raise typer.Exit(1)
+
+    outcome = asyncio.run(judge_results(cases, payload, registry, judge, max_total_cost_usd=max_total_usd))
+    report = render_judged_report(cases, payload, outcome, judge)
+    (results_dir / "judged.md").write_text(report, encoding="utf-8")
+    (results_dir / "judged.json").write_text(json.dumps(outcome_to_json(outcome), ensure_ascii=False, indent=2), encoding="utf-8")
+    typer.echo(report)
+    typer.echo(f"\n저장: {results_dir / 'judged.md'}, {results_dir / 'judged.json'}")
 
 
 def _summary_dict(s) -> dict:

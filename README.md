@@ -77,7 +77,7 @@ src/devorch/
 ├── cli/main.py
 ├── config.py  audit.py  models.py
 bench/          # (src/devorch/bench) 케이스·채점·러너·리포트, cases/*.yaml
-tests/              # 295 tests + 1 skip (Windows에서 symlink 권한이 없으면 skip)
+tests/              # 316 tests + 1 skip (Windows에서 symlink 권한이 없으면 skip)
 examples/demo-spring/   # 영향 분석 시연용 작은 Java 프로젝트
 ```
 
@@ -156,6 +156,10 @@ devorch bench run --mode both --repeats 3        # 실제 LLM: 호출 횟수 확
 - `single`(범용 리뷰어 1명) vs `multi`(policy의 HIGH 등급 전문 리뷰어 + 범용)를 같은 diff로 비교합니다.
   `--mode solo:<provider>[:<role>]`(예: `solo:gemini`, `solo:openai:architecture`)는 리뷰어 **한 명만** 따로 돌립니다. 쉼표로 여러 모드를 함께 지정합니다
   (`--mode single,solo:gemini:review`). 모드 간 차이에는 **모델과 프롬프트 역할이 섞여** 있을 수 있어 이렇게 분리해 확인합니다.
+- **LLM 판정기** `devorch bench judge <결과 디렉터리> --judge claude`: 저장된 결과를 다시 판정합니다(리뷰어는 다시 호출하지 않음). 정규식이 놓치거나 우연히 맞힌 경우를 보려는 **두 번째 의견**이며
+  정규식을 대체하지 않습니다. 판정자는 과제·diff·시드한 결함 하나·번호 매긴 지적만 보고 **어느 모델이 쓴 지적인지, 정규식이 무엇인지 모릅니다**. 호출 실패·파싱 실패·비용 상한은
+  탐지도 미탐지도 아닌 **"미판정"**으로 따로 셉니다. 결과(`judged.md`, `judged.json`)는 두 판정이 **엇갈린 항목을 판정기의 사유와 함께** 나열하니 사람이 확인하세요.
+  판정기 자체는 **검증되지 않았고**, 리뷰어와 같은 회사 모델이면 자기 선호 편향이 있을 수 있어 경고합니다. `--max-total-usd`로 판정 비용을 제한할 수 있습니다.
 - **통계의 단위는 결함입니다.** 반복(`--repeats`)은 같은 케이스를 다시 돌린 것이라 독립 표본이 아니므로, 리포트는 `탐지(실행)`(반복을 독립으로 가정해 구간이 좁음)과
   `탐지(결함 단위)`(과반의 반복에서 탐지돼야 탐지, 불안정한 결함 수 표시)를 함께 보여주고, 쌍체 부호검정은 결함 단위로 합니다.
 - 지표: 탐지율, 대조군 오탐률, 불완전 리뷰 수, 매칭 안 된 지적 수, 토큰과 비용(단가 설정 시), 지연. 95% Wilson 구간과 정확 부호검정을 함께 보고합니다.
