@@ -1,0 +1,32 @@
+id: c14_duplicated_rule
+title: 세금 규칙 중복 구현
+task: 송장 총액을 계산하는 함수를 추가해줘
+files:
+  app/services/pricing.py:
+    before: |
+      TAX_RATE = 0.1
+
+
+      def calc_tax(amount):
+          return round(amount * TAX_RATE, 2)
+    after: |
+      TAX_RATE = 0.1
+
+
+      def calc_tax(amount):
+          return round(amount * TAX_RATE, 2)
+
+
+      def invoice_total(amount):
+          tax = round(amount * 0.1, 2)
+          return amount + tax
+defects:
+  - id: dup_rule
+    category: architecture
+    severity: medium
+    description: 세금 계산 규칙이 하드코딩되어 중복 구현됨 — 기존 calc_tax / TAX_RATE 를 재사용하지 않아 세율 변경 시 어긋남
+    match_any: ["duplicat", "\\bDRY\\b", "magic number", "hard-?coded", "중복", "하드 ?코딩", "매직 ?넘버", "single source", "단일 ?(출처|원천|지점)", "diverg", "재사용"]
+    file: app/services/pricing.py
+notes: >-
+  [추가 2026-10-09] 첫 풀 실행에서 아키텍처 케이스가 c08 하나뿐이라 추가. 판정 정규식은 실행 전에 확정했고,
+  결과를 보고 고치지 않는다(고치면 이 notes 에 개정 이력과 이유를 남길 것).

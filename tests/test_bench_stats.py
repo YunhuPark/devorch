@@ -73,7 +73,7 @@ def test_solo_modes_build_one_reviewer_with_the_given_provider_and_role():
     assert [(s.role, s.provider) for s in review_steps(POLICY, "solo:gemini")] == [("review", "gemini")]
     assert [(s.role, s.provider) for s in review_steps(POLICY, "solo:openai:architecture")] == [("architecture", "openai")]
     assert [(s.role, s.provider) for s in review_steps(POLICY, "solo:claude:security")] == [("security", "claude")]
-    assert expected_calls(CASES, POLICY, ["solo:gemini", "solo:openai:security"], 3) == 2 * 11 * 3
+    assert expected_calls(CASES, POLICY, ["solo:gemini", "solo:openai:security"], 3) == 2 * 16 * 3
 
 
 @pytest.mark.parametrize("bad", ["solo:", "solo:grok", "solo:gemini:chef", "solo:gemini:review:extra", "solo", "triple"])

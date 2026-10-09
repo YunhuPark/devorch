@@ -31,9 +31,9 @@ def f(sev="high", title="t", detail="", cat="security"):
 
 def test_builtin_cases_are_valid():
     assert validate_cases(CASES) == []
-    assert len(CASES) == 11
-    assert sum(len(c.defects) for c in CASES) == 9
-    assert sum(c.clean for c in CASES) == 3
+    assert len(CASES) == 16
+    assert sum(len(c.defects) for c in CASES) == 13
+    assert sum(c.clean for c in CASES) == 4
 
 
 @pytest.mark.parametrize("case", CASES, ids=lambda c: c.id)
@@ -82,7 +82,7 @@ def test_review_steps_modes():
     assert {s.role for s in review_steps(POLICY, "multi")} == {"security", "architecture", "review"}
     with pytest.raises(ValueError):
         review_steps(POLICY, "x")
-    assert expected_calls(CASES, POLICY, ["single", "multi"], 2) == (1 + 3) * 11 * 2
+    assert expected_calls(CASES, POLICY, ["single", "multi"], 2) == (1 + 3) * 16 * 2
 
 
 async def test_oracle_detects_everything_null_detects_nothing():
@@ -96,7 +96,7 @@ async def test_oracle_detects_everything_null_detects_nothing():
 
     res = await run_benchmark(CASES, POLICY, registry(lambda n: MockProvider(n, oracle)), ["single"])
     s = summarize(CASES, res, "single")
-    assert s.detected == s.defect_runs == 9
+    assert s.detected == s.defect_runs == 13
     assert s.false_positives == 0 and s.incomplete == 0
 
     res = await run_benchmark(CASES, POLICY, registry(lambda n: MockProvider(n, ["[]"])), ["single", "multi"])
@@ -104,7 +104,7 @@ async def test_oracle_detects_everything_null_detects_nothing():
         s = summarize(CASES, res, m)
         assert s.detected == 0 and s.false_positives == 0 and s.unmatched == 0
     p = paired_comparison(CASES, res, "single", "multi")
-    assert p["only_a"] == p["only_b"] == 0 and p["neither"] == 9 and p["p_value"] == 1.0
+    assert p["only_a"] == p["only_b"] == 0 and p["neither"] == 13 and p["p_value"] == 1.0
 
 
 async def test_failing_or_garbage_reviewer_is_incomplete_not_pass():
@@ -115,7 +115,7 @@ async def test_failing_or_garbage_reviewer_is_incomplete_not_pass():
     res = await run_benchmark(CASES, POLICY, registry(lambda n: Boom(n)), ["single"])
     assert all(not r.completed for r in res)
     s = summarize(CASES, res, "single")
-    assert s.incomplete == 11 and s.detected == 0
+    assert s.incomplete == 16 and s.detected == 0
     assert s.clean_runs_completed == 0 and s.fp_rate == 0.0  # incomplete clean runs are not "clean passes"
 
     res = await run_benchmark(CASES, POLICY, registry(lambda n: MockProvider(n, ["not json at all"])), ["single"])
@@ -126,7 +126,7 @@ async def test_false_positive_counted_on_clean_cases_only():
     always = json.dumps([{"severity": "high", "category": "security", "title": "scary", "detail": "x"}])
     res = await run_benchmark(CASES, POLICY, registry(lambda n: MockProvider(n, [always])), ["single"])
     s = summarize(CASES, res, "single")
-    assert s.false_positives == 3 == s.clean_runs_completed and s.fp_rate == 1.0
+    assert s.false_positives == 4 == s.clean_runs_completed and s.fp_rate == 1.0
     low = json.dumps([{"severity": "low", "category": "style", "title": "nit", "detail": ""}])
     res = await run_benchmark(CASES, POLICY, registry(lambda n: MockProvider(n, [low])), ["single"])
     assert summarize(CASES, res, "single").false_positives == 0  # below the FP severity threshold
@@ -142,10 +142,10 @@ async def test_heuristic_mock_is_deterministic_and_repeats_multiply():
     reg = registry(heuristic_provider)
     a = await run_benchmark(CASES, POLICY, reg, ["multi"], repeats=2)
     b = await run_benchmark(CASES, POLICY, reg, ["multi"], repeats=2)
-    assert len(a) == 22
+    assert len(a) == 32
     key = lambda rs: sorted((r.case_id, r.repeat, tuple(sorted(r.detected))) for r in rs)
     assert key(a) == key(b)
-    assert summarize(CASES, a, "multi").defect_runs == 18
+    assert summarize(CASES, a, "multi").defect_runs == 26
 
 
 def test_cli_mock_run_writes_files_with_banner(tmp_path):
