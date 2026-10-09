@@ -19,6 +19,13 @@ CLASSES: dict[str, type[LLMProvider]] = {
 DEFAULT_MODELS = {"claude": "claude-sonnet-5-5"}
 
 
+def key_problem(api_key: str) -> str | None:
+    """Why this key can't be sent as an HTTP header (None = fine). The text never contains the key."""
+    if not api_key.isascii() or any(c.isspace() or not c.isprintable() for c in api_key):
+        return "공백·보이지 않는 문자·비ASCII 문자가 섞여 있음"
+    return None
+
+
 def build_registry(
     config: Mapping[str, Any],
     env: Mapping[str, str] | None = None,
@@ -38,10 +45,10 @@ def build_registry(
         if not api_key:
             skipped[name] = f"환경변수 {key_env or '(api_key_env 미설정)'} 가 비어 있음"
             continue
-        if not api_key.isascii() or any(c.isspace() or not c.isprintable() for c in api_key):
+        if (problem := key_problem(api_key)) is not None:
             # A key with stray whitespace / invisible or non-ASCII characters makes the HTTP header malformed, which the
             # vendors answer with a bodiless 400. Refuse before any call; never print the key itself.
-            skipped[name] = f"환경변수 {key_env} 에 공백·보이지 않는 문자·비ASCII 문자가 섞여 있음 (키를 다시 입력하세요)"
+            skipped[name] = f"환경변수 {key_env} 에 {problem} (키를 다시 입력하세요)"
             continue
         model = cfg.get("model") or DEFAULT_MODELS.get(name)
         if not model:

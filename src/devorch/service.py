@@ -29,7 +29,7 @@ from devorch.core.orchestrator.state import State
 from devorch.core.router.cost_model import estimate_call, merge_prices, prices_from_config, prices_from_registry
 from devorch.core.router.model_router import plan_routing
 from devorch.git.manager import GitError
-from devorch.models import Finding
+from devorch.models import Finding, RiskLevel
 from devorch.providers.base import ProviderRegistry
 from devorch.providers.factory import build_registry
 from devorch.providers.mock import MockProvider
@@ -96,14 +96,15 @@ class ControlPlane:
         """Configured per-Mtok prices; a registered adapter's own prices take precedence over config.yaml."""
         return merge_prices(prices_from_config(self.config), prices_from_registry(self.providers))
 
-    def _estimate_review(self, record: TaskRecord, steps) -> dict[str, Any]:
+    def _estimate_review(self, record: TaskRecord, steps, log: bool = True) -> dict[str, Any]:
         """Cost of the reviews about to run, from the REAL prompts (so the actual diff size is counted). usd is None if any
         reviewer has no price — unknown, never 0. Logged so estimates can later be compared with the actual cost."""
         prices = self._prices()
         ests = [estimate_call(s.provider, len(REVIEWER_SYSTEM) + len(build_review_prompt(record.run, s)), prices) for s in steps]
         usd = None if any(e.usd is None for e in ests) else round(sum(e.usd for e in ests), 6)
         info = {"estimated_usd": usd, "input_tokens": sum(e.input_tokens for e in ests), "output_tokens": sum(e.output_tokens for e in ests), "calls": len(ests)}
-        self._log(record, "review_estimate", **info)
+        if log:
+            self._log(record, "review_estimate", **info)
         return info
 
     def _load(self, task_id: str) -> TaskRecord:
@@ -121,13 +122,15 @@ class ControlPlane:
         except ExecutionError as e:
             raise ControlPlaneError(str(e)) from e
 
-    def _capture_diff(self, record: TaskRecord) -> str:
-        """Snapshot the working tree vs HEAD into the record. Returns the diff SHA."""
-        self._require_git()
-        try:
-            diff = self.executor.git.working_diff()
-        except GitError as e:
-            raise ControlPlaneError(f"diff를 만들지 못함: {e}") from e
+    def _capture_diff(self, record: TaskRecord, diff: str | None = None) -> str:
+        """Snapshot the diff into the record (the working tree vs HEAD, or ``diff`` if one is handed in — the CLI's
+        ``review --git-range/--diff-file``). Same validation either way. Returns the diff SHA."""
+        if diff is None:
+            self._require_git()
+            try:
+                diff = self.executor.git.working_diff()
+            except GitError as e:
+                raise ControlPlaneError(f"diff를 만들지 못함: {e}") from e
         if not diff.strip():
             raise ControlPlaneError("변경 사항이 없습니다. 먼저 작업 트리의 코드를 수정하세요.")
         try:
@@ -196,13 +199,23 @@ class ControlPlane:
             "test_command": self.executor.test_command or "(자동 감지)",
         }
 
-    def analyze_task(self, task: str) -> dict[str, Any]:
+    def analyze_task(self, task: str, level: str | None = None) -> dict[str, Any]:
+        """``level`` (CLI only, never an MCP argument) can RAISE the automatically assessed risk level, never lower it."""
         try:
             analysis = analyze_task(task)
         except ValueError as e:
             raise ControlPlaneError(str(e)) from e
         impact = analyze_impact(self.root, analysis)
         risk = assess_risk(analysis, impact)
+        if level is not None:
+            try:
+                wanted = RiskLevel(level.strip().lower())
+            except ValueError as e:
+                raise ControlPlaneError(f"level 은 {' | '.join(l.value for l in RiskLevel)} 중 하나여야 합니다.") from e
+            if wanted.rank < risk.level.rank:
+                raise ControlPlaneError(f"자동 평가({risk.level.value})보다 위험 수준을 낮출 수 없습니다. 높이는 것만 가능합니다.")
+            if wanted is not risk.level:
+                risk = risk.model_copy(update={"level": wanted, "floor_reason": f"사용자 지정 위험 수준({wanted.value}) — 자동 평가는 {risk.level.value}"})
         plan = plan_routing(analysis, risk, impact, self.policy, prices=self._prices())
         run = WorkflowRun(task_text=task.strip(), state=State.PLANNED, analysis=analysis, impact=impact, risk=risk, plan=plan)
         record = TaskRecord(run=run)
@@ -265,7 +278,27 @@ class ControlPlane:
         self._log(record, "get_diff", diff_sha=sha)
         return {"task_id": record.id, "diff_sha": sha, "files": validate_diff(record.diff), "diff": record.diff}
 
-    async def request_review(self, task_id: str) -> dict[str, Any]:
+    def preview_review(self, task_id: str, diff: str | None = None) -> dict[str, Any]:
+        """What a review would involve, with NO LLM call: the diff (validated), the reviewers, and the cost estimate."""
+        record = self._load(task_id)
+        plan = record.run.plan
+        assert plan
+        sha = self._capture_diff(record, diff)
+        self.store.save(record)
+        steps = plan.review_steps
+        est = self._estimate_review(record, steps, log=False)
+        return {
+            "task_id": record.id,
+            "diff_sha": sha,
+            "diff_bytes": len(record.diff.encode("utf-8")),
+            "files": validate_diff(record.diff),
+            "risk": record.run.risk.level.value if record.run.risk else None,
+            "reviewers": [f"{s.role}:{s.provider}" for s in steps],
+            "missing_providers": sorted({s.provider for s in steps} - set(self.providers.names())),
+            **est,
+        }
+
+    async def request_review(self, task_id: str, diff: str | None = None) -> dict[str, Any]:
         record = self._load(task_id)
         run, plan = record.run, record.run.plan
         assert plan
@@ -280,7 +313,7 @@ class ControlPlane:
         if (problem := budget_preflight(self.providers, {s.provider for s in steps}, cap)) is not None:
             raise ControlPlaneError(problem)
 
-        sha = self._capture_diff(record)
+        sha = self._capture_diff(record, diff)
         ev = run.evaluation
         if record.reviewed_sha == sha and ev is not None and not ev.missing_reviews:
             self.store.save(record)
@@ -293,11 +326,16 @@ class ControlPlane:
                 "reason": f"리뷰 라운드 한도({max_rounds}회)에 도달했습니다. 사람이 직접 검토하거나 작업을 다시 시작하세요.",
             }
 
+        estimate = self._estimate_review(record, steps)
+        if cap is not None and estimate["estimated_usd"] is not None and run.total_cost_usd + estimate["estimated_usd"] > cap:
+            raise ControlPlaneError(
+                f"예상 리뷰 비용 ${estimate['estimated_usd']:.4f} 가 남은 비용 상한 ${max(0.0, cap - run.total_cost_usd):.4f} "
+                f"(limits.max_cost_usd=${cap})을 넘을 것으로 보여 호출하지 않았습니다. 상한을 올리거나 변경을 나누세요."
+            )
         record.review_rounds += 1
         required = [s.role for s in steps]
         findings: list[Finding] = []
         completed: list[str] = []
-        estimate = self._estimate_review(record, steps)
         if steps:
             findings, completed = await run_reviews(run, steps, self.providers, self.audit, label=f"review {record.review_rounds}: ", max_cost_usd=cap)
         run.findings = findings
@@ -332,6 +370,8 @@ class ControlPlane:
             "cost_usd": None if run.cost_unknown else round(run.total_cost_usd, 4),
             # estimated BEFORE the calls from the real prompt size and the configured prices (None = a reviewer has no price)
             "estimated_review_cost_usd": estimate["estimated_usd"] if estimate else None,
+            "usage": run.usage,  # tokens per provider, cumulative over this task's LLM calls
+            "reviewers": [f"{s.role}:{s.provider}" for s in (run.plan.review_steps if run.plan else [])],
             "notes": run.notes[-5:],
             "next_step": nxt,
         }

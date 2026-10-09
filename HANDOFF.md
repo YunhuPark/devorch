@@ -6,20 +6,32 @@
 한국어로, 결론부터, 짧게 답한다. 사용자는 비전문가일 수 있으니 명령어는 그대로 복사해서 쓸 수 있게 준다.
 
 ## 프로젝트
-AI에게 코드를 맡겨도 되는지 판단·통제하는 엔진.
+AI에게 코드를 맡겨도 되는지 판단·통제하는 엔진. 사용자가 밝힌 동기(2026-10-08)는 **회사의 AI 비용**이다 — 단, 기획서의 정의는
+"통제 중심 Control Plane"이고 비용은 그 하위 기능이라 둘의 관계("위험에 비례해서만 검증 비용을 쓴다")는 **사용자가 아직 확정하지 않았다.**
 Task → Analyze → Risk → Impact → Route → Implement → Independent Review → Evaluate → Human Approval → Apply/Test → Audit
-인터페이스: CLI(`devorch`), MCP 서버(stdio), 읽기 전용 Dashboard. 코드는 `src/devorch`, 자세한 사용법은 README.md.
-설치: `python -m venv .venv` → `.venv\Scripts\Activate.ps1` → `pip install -e ".[dev,llm]"` → `pytest`
+인터페이스: CLI(`devorch`, 안 되면 `python -m devorch`), MCP 서버(stdio), 읽기 전용 Dashboard. 코드는 `src/devorch`, 사용법은 README.md.
+설치: `python -m venv .venv` → `.venv\Scripts\Activate.ps1` → `pip install -e ".[dev,llm]"` → `pytest`. 막히면 `devorch doctor`.
 
-## 현재 상태 (사실만)
-- 구현 완료, 테스트 192개 통과(리눅스 환경). Windows 네이티브 pytest는 아직 안 돌려봤다.
-  Windows에서 깨질 수 있는 곳: `os.killpg`(테스트 타임아웃), `os.getuid`(sandbox), 경로 처리.
-- 구성: Task Analyzer / Risk Engine(규칙 기반 + 최소 등급 floor) / Impact Analyzer(정규식) / Model Router + policy.yaml /
-  Evaluator(fail-closed) / 상태 머신 + 워크플로 엔진 / Provider 어댑터(Anthropic, OpenAI, Gemini) /
-  실행기(git worktree + git apply + allowlist 테스트 + 브랜치 커밋) / MCP 서버 / Docker 샌드박스 / Benchmark / Dashboard.
-- **검증하지 못한 것(검증했다고 쓰지 말 것):** 실제 LLM API 호출, 벤치마크 실측 수치(mock뿐), 실제 Docker 컨테이너 실행,
-  실제 MCP 클라이언트(Claude Code 등) 연결, Windows 네이티브 실행.
-- `devorch bench run --claude-only`: 모든 리뷰어 역할을 claude로 배정(Anthropic 키 1개만 필요).
+## 현재 상태 (2026-10-09, 사실만)
+- **테스트: Windows 네이티브에서 367 passed, 1 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
+  이 PC의 `git.exe` 실행이 간헐적으로 거부됨(WinError 5, 원인 미확정, `git/manager.py` 에 Windows 한정 재시도 완화책).
+- 구현됨: Task Analyzer / Risk Engine / Impact Analyzer / Model Router + policy.yaml / Evaluator(fail-closed) / 상태 머신 / Provider 어댑터
+  (Anthropic, OpenAI, Gemini) / 실행기(git worktree) / MCP 서버 / Docker 샌드박스 / Benchmark(+LLM 판정기, solo 모드, 결함 단위 통계) / Dashboard /
+  **작업당 비용 상한(`limits.max_cost_usd`)과 벤치마크 합계 상한(`--max-total-usd`)** / 호출별 토큰 기록 / **토큰×단가 예상 비용** /
+  `devorch review`(작업 트리·git 범위·diff 파일) / `devorch doctor` / `python -m devorch`.
+- **실제로 확인한 것:** Anthropic(`claude-sonnet-5-5`), OpenAI(`gpt-6-sol`), Gemini(`gemini-3.6-flash`)의 실제 호출 성공, Windows에서 실제 stdio 하위 프로세스로 MCP 전체 흐름,
+  OpenAI 사용량 화면과 DevOrch 집계의 일치(요청 6회, 입력 1,734 토큰, 지출 $0.02), 단가는 Claude 공식 페이지 원문으로 확인.
+- **검증하지 못한 것(검증했다고 쓰지 말 것):**
+  - **실제 MCP 클라이언트(Claude Code 등) 연결** — 연습 프로젝트(`..\devorch-playground`, `.mcp.json` 포함)를 만들어 뒀지만 사람이 앱에서 확인해야 함.
+  - 실제 Docker 컨테이너 실행(Windows의 `1000:1000` 사용자와 `C:\` 마운트 포함).
+  - **큰 diff의 비용 예측** — 계수는 약 300 토큰짜리 diff에서만 맞췄다. 구현 단계 비용은 실측이 없고(고정값 $0.05), claude 토큰 계수도 미측정.
+  - OpenAI 추론 토큰이 `usage.output_tokens`에 포함되는지(입력·요청 수·지출은 일치, 출력 분리는 미확인). Gemini 단가는 2027년 인상 예정(요약 표 기준, 미확인).
+  - LLM 판정기의 신뢰성(판정자 Claude는 내 판단과 같은 계열이라 독립 확인이 아님).
+  - OpenAI/Gemini 단가·모델 ID는 공식 페이지를 *요약기*로 읽은 값(config.yaml, git 제외) — 사용 전에 원문과 대조할 것.
+- **벤치마크 실측(모두 소규모, 13개 시드 결함)** — 결함 단위 탐지: single(GPT 일반) 11/13(판정기 기준, 정규식은 10/13), multi(GPT 보안+일반, Gemini 아키텍처) 12/13,
+  `solo:gemini:review` 12/13, `solo:openai:architecture` 12/13. 쌍체 p=0.5~1.0이라 **탐지 차이가 확인되지 않음.** 비용은 multi $0.175 대 단일 구성 $0.054~0.061(약 3배)로 안정적.
+  보안·논리 결함은 모든 구성이 찾았고, 구성 간 유일한 일관된 차이는 `c08`(계층 위반) — GPT 일반 프롬프트는 놓치고 아키텍처 프롬프트/Gemini는 찾음(프롬프트 효과가 큼).
+  케이스 한계: `c15`는 4개 모드 모두 다른 문제(TTL)를 지적해 비교 불가, `c16` 대조군은 자리표시 데이터 때문에 완전히 깨끗하지 않음, `c14`는 정규식이 실제 탐지를 놓침(notes 참고).
 
 ## 절대 지킬 설계 원칙
 1. fail-closed: 리뷰 실패·파싱 불가 = 통과가 아니라 "미완료"(NOT_READY). 필요한 provider가 없으면 토큰을 쓰기 전에 중단.
@@ -27,20 +39,28 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 3. 승인은 터미널 `devorch approve`(TTY 필수)로만. MCP/Dashboard에 승인·쓰기 기능을 만들지 않는다. MCP elicitation을 승인 수단으로 쓰지 않는다.
 4. 사용자의 현재 브랜치·작업 트리는 건드리지 않는다. 적용은 임시 git worktree → `devorch/<run>-<slug>` 브랜치 커밋만.
 5. 테스트 명령은 allowlist만, 셸 미사용, 타임아웃, API 키/토큰 환경변수 제거. docker 모드인데 docker를 못 쓰면 테스트 실패(호스트 실행으로 대체 금지).
-6. 키는 환경변수로만. 채팅·파일·로그·커밋에 넣지 않는다. credential 문자열이 있는 diff는 외부 LLM에 보내지 않는다.
+6. 키는 환경변수로만. 채팅·파일·로그·커밋에 넣지 않는다. credential 문자열이 있는 diff는 외부 LLM에 보내지 않는다. 키 값은 진단 출력에도 찍지 않는다(길이와 문제 종류만).
 7. 모델 ID를 추측하지 않는다. 비용은 단가가 설정된 경우에만 계산, 아니면 unknown. mock 벤치마크 결과엔 항상 "MOCK — harness check only" 배너.
 8. 가짜 이력 금지: 과거 프로젝트를 "DevOrch로 만들었다"고 꾸미는 로그·커밋·문서를 만들지 않는다.
+9. **측정 전에 정의한다.** 벤치마크의 판정 정규식·오탐 기준·케이스는 실행 *전에* 확정한다. 결과를 보고 고치지 않는다 — 고치면 해당 케이스 notes 에 이력과 이유를 남기고
+   이전 결과와 직접 비교하지 않는다. 관찰한 한계는 수정하지 말고 기록한다.
+10. **통계의 단위는 독립 표본이다.** 같은 케이스의 반복 실행은 독립이 아니다. 결함 단위로 집계하고, 차이가 없으면 "차이를 확인하지 못했다"고 쓴다("같다"가 아니다).
+11. **안전 장치는 일부러 깨 봐서 테스트가 잡는지 확인한다**(변형 확인). 비용·보안 거부는 LLM 호출 *전에* 일어나야 한다. 위험 수준은 올릴 수만 있고 낮출 수 없다.
 
 ## 지금 할 일 (우선순위)
-1. Windows 네이티브에서 `pytest` 실행 → 실패를 Windows 호환으로 수정.
-2. 사용자가 PowerShell에서 `$env:ANTHROPIC_API_KEY` 설정 후 `devorch bench run --mode single --claude-only --repeats 1` → report.md 분석.
-3. 작업당 비용 상한(budget guard) 구현: policy의 max_cost_usd 초과 시 중단, 토큰·비용을 감사 로그에 기록.
-4. 실측으로 single vs multi 비교(탐지율·오탐률·비용·지연, 95% Wilson, 쌍체 부호검정) 해석. 모델 추가(예: Grok) 여부는 이 결과로만 판단.
-5. 포트폴리오 케이스 스터디의 "미검증" 항목을 실측으로 갱신. 한계를 숨기지 않는 것이 강점.
+1. **큰 diff 비용 측정**: 사용자가 PowerShell에 키를 넣고 `python -m devorch review --git-range <범위> --task "..." --level high --yes` 를 크기가 다른 실제 커밋 3~4개에 실행 →
+   출력의 "예상 vs 실제 비용" 오차를 모아 `core/router/cost_model.py` 계수를 재보정(오차 ±15% 목표). 오차가 크면 큰 diff는 별도 계수/상한으로 처리.
+2. **Claude Code 실연결**: `..\devorch-playground` 를 VS Code로 열어 `.mcp.json` 서버를 승인하고 전체 흐름을 한 번 돌린다. 막히는 곳은 `devorch doctor` 출력에 반영.
+3. **구현 단계 비용 실측**: `devorch run`(구현 포함)을 소액으로 실행해 구현 호출의 입출력 토큰을 기록, `policy.estimates.cost_usd` 고정값 대체.
+4. **현실적 평가 세트**: 시드 결함 대신 실제 오픈소스 버그 수정 커밋(알려진 버그)으로 탐지율·비용 평가. 판정은 사람 확인이 섞인 정답 라벨 필요.
+5. 위 데이터로 HIGH 기본 정책(리뷰어 3명)을 재검토: 단일 교차 회사 리뷰어 + 초점 프롬프트가 같은 탐지를 3분의 1 비용에 하는지. CRITICAL 의 독립 리뷰어 2명은 비용이 아니라 통제 규칙이라 측정만으로 바꾸지 않는다.
+6. 포트폴리오 케이스 스터디의 "미검증" 항목을 실측으로 갱신. 한계를 숨기지 않는 것이 강점.
 
 ## 아직 만들지 말 것
-Cost Optimizer / Adaptive Routing — 실측 데이터가 쌓인 뒤. Grok 어댑터 — 벤치마크로 이득이 확인된 뒤.
+Cost Optimizer / Adaptive Routing / 캐스케이드 — 4번(현실적 평가) 이후. Grok 어댑터 — 벤치마크로 이득이 확인된 뒤. FastAPI·DB·Next.js — 핵심 가치와 무관, 요구가 생길 때만.
 
 ## 작업 방식
-변경 전 관련 테스트를 읽고, 변경 후 전체 `pytest`. 의미 있는 단언만 쓴다. 실패 경로(변조·우회·실패 처리)를 먼저 테스트한다.
+변경 전 관련 테스트를 읽고, 변경 후 전체 `pytest`. 의미 있는 단언만 쓴다. 실패 경로(변조·우회·실패 처리)를 먼저 테스트한다(테스트 먼저 → 실패 확인 → 구현).
 확인하지 못한 것은 "미검증", 추정은 "추정"이라고 쓴다. 기존 구조(`src/devorch/{core,providers,security,bench,dashboard,cli}`)를 따른다.
+Windows 콘솔은 cp949 라 `≈` 같은 문자를 출력하면 UnicodeEncodeError 가 난다 — CLI 출력에는 ASCII/한글만 쓰고, 한글이 든 결과는 파일로 쓴 뒤 읽는다. 키 입력 안내는 클립보드 방식
+(`$env:X = (Get-Clipboard -Raw).Trim()`)을 쓴다. 비용이 드는 실행은 항상 `--max-total-usd` 를 붙이고 사용자의 확인을 받는다.

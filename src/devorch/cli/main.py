@@ -157,6 +157,21 @@ def _print_run(run: WorkflowRun) -> None:
 
 
 @app.command()
+def doctor(path: Path = PathOpt, as_json: bool = typer.Option(False, "--json", help="JSON으로 출력")) -> None:
+    """이 컴퓨터에서 DevOrch가 동작하지 못하게 막는 것을 점검하고 해결 방법을 알려준다 (네트워크·LLM 호출 없음, 키 값은 출력하지 않음)."""
+    from devorch.doctor import render, run_checks
+
+    checks = run_checks(path)
+    failed = any(c.status == "fail" for c in checks)
+    if as_json:
+        typer.echo(json.dumps({"ok": not failed, "checks": [c.__dict__ for c in checks]}, ensure_ascii=False, indent=2))
+    else:
+        typer.echo(render(checks))
+    if failed:
+        raise typer.Exit(1)
+
+
+@app.command()
 def providers(path: Path = PathOpt) -> None:
     """설정된 LLM provider의 사용 가능 여부를 보여준다 (네트워크 호출 없음)."""
     registry, skipped = build_registry(load_config(path))
@@ -330,6 +345,108 @@ def tasks(path: Path = PathOpt) -> None:
         s = plane.task_summary(tid)
         g = s["gates"]
         typer.echo(f"{tid}  {str(s['risk']).upper():<8} review={g['evaluation'] or '-':<20} tests={g['tests']:<12} approval={g['approval']:<12} {s['task'][:40]}")
+
+
+def _fmt_usd(x: float | None) -> str:
+    return "알 수 없음(단가 없음)" if x is None else f"${x:.4f}"
+
+
+@app.command()
+def review(
+    path: Path = PathOpt,
+    task: str = typer.Option(None, "--task", "-t", help="이 변경이 무엇인지 설명(위험도 분석에 쓰임). 생략하면 git 범위의 커밋 제목을 씀"),
+    git_range: str = typer.Option(None, "--git-range", help="리뷰할 커밋 범위. 예: HEAD~1..HEAD, main..feature"),
+    diff_file: Path = typer.Option(None, "--diff-file", help="리뷰할 unified diff 파일 (git 저장소가 아니어도 됨)"),
+    level: str = typer.Option(None, "--level", help="위험 수준을 low|medium|high|critical 로 '높인다'(자동 평가보다 낮추는 것은 거부)"),
+    mock: bool = typer.Option(False, "--mock", help="가짜 Provider로 흐름만 시연"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="확인 질문 생략"),
+    as_json: bool = typer.Option(False, "--json", help="JSON으로 출력(--yes 필요)"),
+) -> None:
+    """변경(작업 트리 / 커밋 범위 / diff 파일)을 정책이 정한 독립 리뷰어에게 보여 READY·NOT_READY 를 판정한다.
+
+    아무것도 적용하거나 커밋하지 않는다. NOT_READY 면 종료 코드 1 (CI 게이트로 쓸 수 있음).
+    비용은 실행 전에 예상해 보여주고, 끝나면 실제 비용과 비교한다. 자격증명이 있거나 너무 큰 diff, 비용 상한을 넘을 것 같은 리뷰는 호출 전에 거부한다."""
+    from devorch.git.manager import GitError
+    from devorch.service import ControlPlaneError
+
+    def fail(msg: str) -> "typer.Exit":
+        typer.echo(f"오류: {msg}", err=True)
+        return typer.Exit(2)
+
+    if git_range and diff_file:
+        raise fail("--git-range 와 --diff-file 은 함께 쓸 수 없습니다(둘 중 하나, 둘 다 없으면 작업 트리).")
+    if as_json and not (yes or mock):
+        raise fail("--json 은 비대화형 출력이라 --yes 가 필요합니다.")
+
+    plane = ControlPlane.from_project(path, mock=mock)
+    diff: str | None = None
+    try:
+        if git_range:
+            plane.executor.ensure_ready()
+            diff = plane.executor.git.range_diff(git_range)
+            if not diff.strip():
+                raise fail(f"{git_range} 범위에 변경이 없습니다.")
+            if task is None:
+                task = "; ".join(plane.executor.git.commit_subjects(git_range)) or None
+        elif diff_file:
+            diff = diff_file.read_text(encoding="utf-8")
+    except (GitError, ExecutionError) as e:
+        raise fail(str(e))
+    except (OSError, UnicodeDecodeError) as e:
+        raise fail(f"diff 파일을 읽지 못했습니다: {e}")
+    task = task or "코드 변경 리뷰"
+
+    try:
+        tid = plane.analyze_task(task, level=level)["task_id"]
+        prev = plane.preview_review(tid, diff)
+    except ControlPlaneError as e:
+        raise fail(str(e))
+
+    if prev["missing_providers"]:
+        detail = "; ".join(f"{m}: {plane.provider_notes.get(m, '등록되지 않음')}" for m in prev["missing_providers"])
+        raise fail(f"리뷰에 필요한 provider를 사용할 수 없습니다 — {detail}  (`devorch providers`, `devorch doctor` 로 확인)")
+
+    if not as_json:
+        typer.echo(f"작업: {task[:80]}")
+        typer.echo(f"위험도: {str(prev['risk']).upper()}   대상: {len(prev['files'])}개 파일, diff {prev['diff_bytes']:,} bytes")
+        if not prev["reviewers"]:
+            typer.echo("이 위험 수준에는 배정된 리뷰어가 없어 리뷰를 하지 않습니다. 리뷰를 받으려면 --level medium|high|critical 로 위험 수준을 높이세요.")
+            raise typer.Exit(0)
+        typer.echo("리뷰어: " + ", ".join(prev["reviewers"]))
+        typer.echo(
+            f"예상 비용: {_fmt_usd(prev['estimated_usd'])} (입력 ~{prev['input_tokens']:,} / 출력 ~{prev['output_tokens']:,} 토큰, 단가×토큰 추정 — "
+            "작은 diff에서만 검증됨, 개별 호출은 편차가 큼)"
+        )
+        if not (yes or mock) and not typer.confirm("실제 LLM API를 호출합니다. 진행할까요?"):
+            raise typer.Exit(1)
+    elif not prev["reviewers"]:
+        typer.echo(json.dumps({"status": "no_reviewers_required", "risk": prev["risk"], "reviewers": []}, ensure_ascii=False))
+        raise typer.Exit(0)
+
+    try:
+        res = asyncio.run(plane.request_review(tid, diff=diff))
+    except ControlPlaneError as e:
+        raise fail(str(e))
+
+    if as_json:
+        typer.echo(json.dumps({**res, "preview": prev}, ensure_ascii=False, indent=2, default=str))
+    else:
+        typer.echo(f"\n결과: {res['status']}")
+        for f in res["blocking"]:
+            typer.echo(f"  [BLOCKING {f['severity'].upper()}] ({f['source']}) {f['title']}" + (f"  — {f['file']}" if f.get("file") else ""))
+        for f in res["warnings"]:
+            typer.echo(f"  [warning {f['severity']}] ({f['source']}) {f['title']}")
+        if res["missing_reviews"]:
+            typer.echo(f"  미완료 리뷰: {', '.join(res['missing_reviews'])} (호출·파싱 실패 — 통과로 보지 않음)")
+        for n in res["notes"]:
+            typer.echo(f"  note: {n}")
+        actual, est = res["cost_usd"], res["estimated_review_cost_usd"]
+        line = f"실제 비용: {_fmt_usd(actual)}"
+        if actual and est:
+            line += f" (예상 {_fmt_usd(est)} 대비 {(est - actual) / actual * 100:+.0f}%)"
+        typer.echo(line + "   토큰: " + (", ".join(f"{p} {u['input_tokens']:,}/{u['output_tokens']:,}" for p, u in res["usage"].items()) or "-"))
+    if res["status"] == "NOT_READY":
+        raise typer.Exit(1)
 
 
 @app.command()

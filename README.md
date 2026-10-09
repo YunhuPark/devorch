@@ -9,17 +9,31 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 
 ## 빠른 시작
 
+**Windows (PowerShell)** — Python 3.11+ 와 git 이 필요합니다.
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1          # 실행 정책 오류가 나면: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+pip install -e ".[dev,llm]"
+```
+**macOS / Linux**
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev,llm]"
-
+```
+그다음 (공통):
+```
+devorch doctor                                 # 이 컴퓨터에서 막히는 곳을 점검하고 해결 방법을 알려줌 (네트워크·LLM 호출 없음, 키 값은 출력 안 함)
 devorch init                                   # .devorch/config.yaml, policy.yaml 생성
-devorch analyze "로그인 기능에 JWT 인증 추가해줘"   # LLM 호출 없이 위험도/영향/라우팅 출력
-devorch analyze "결제 API 수정" --json
+devorch analyze "로그인 기능에 JWT 인증 추가해줘"   # LLM 호출 없이 위험도/영향/라우팅/예상 비용 출력
 devorch run "로그인 JWT 인증 추가" --mock         # 가짜 Provider로 전체 워크플로 시연
-devorch providers                              # 어떤 provider가 사용 가능한지(키/모델 설정) 확인
+devorch review --git-range HEAD~1..HEAD --task "로그인 JWT 인증 추가"   # 정책이 정한 독립 리뷰어에게 실제 변경을 리뷰받음
 pytest
 ```
+- `devorch` 명령이 실행되지 않으면(런처 문제) `python -m devorch ...` 로 똑같이 실행됩니다.
+- **API 키는 환경변수로만** 넣습니다. PowerShell: 키를 복사한 뒤 `$env:OPENAI_API_KEY = (Get-Clipboard -Raw).Trim()`. 입력창에 `Ctrl+V` 로 붙여넣는 방식(`Read-Host -AsSecureString`)은 이 환경에서 제어문자 하나만 들어가 실패했습니다.
+  OpenAI·Gemini 는 `config.yaml` 에 **모델 ID와 단가(100만 토큰당 USD)** 도 직접 적어야 합니다(추측하지 않습니다). 상태는 `devorch doctor` 로 확인하세요.
+- `devorch review`: 작업 트리(기본) / `--git-range A..B` / `--diff-file` 의 변경을 리뷰합니다. **실행 전에 예상 비용을 보여주고 확인을 받으며**, 끝나면 실제 비용과 비교합니다.
+  자격증명이 있거나 너무 큰 diff, 비용 상한을 넘을 것 같은 리뷰는 호출 전에 거부합니다. 위험 수준은 `--level` 로 **높이기만** 가능합니다. `NOT_READY` 면 종료 코드 1이라 CI 게이트로 쓸 수 있습니다.
 
 ## 현재 구현 상태
 
@@ -81,7 +95,7 @@ src/devorch/
 ├── cli/main.py
 ├── config.py  audit.py  models.py
 bench/          # (src/devorch/bench) 케이스·채점·러너·리포트, cases/*.yaml
-tests/              # 338 tests + 1 skip (Windows에서 symlink 권한이 없으면 skip)
+tests/              # 367 tests + 1 skip (Windows에서 symlink 권한이 없으면 skip)
 examples/demo-spring/   # 영향 분석 시연용 작은 Java 프로젝트
 ```
 

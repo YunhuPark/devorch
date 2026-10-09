@@ -106,6 +106,26 @@ class GitManager:
                 env=env,
             ).stdout
 
+    # Revisions and ranges only: no spaces, no leading '-' (it would be parsed as a git option, e.g. --output=FILE).
+    _RANGE_RE = re.compile(r"^[A-Za-z0-9_./@{}^~:+][A-Za-z0-9_./@{}^~:+-]*(\.\.\.?[A-Za-z0-9_./@{}^~:+][A-Za-z0-9_./@{}^~:+-]*)?$")
+
+    def _check_range(self, rev_range: str) -> None:
+        if not self._RANGE_RE.match(rev_range or ""):
+            raise GitError(f"잘못된 git 범위입니다: {rev_range!r} (예: HEAD~1..HEAD, main..feature)")
+
+    def range_diff(self, rev_range: str) -> str:
+        """Diff of a commit range (``A..B``), with the same exclusions as :meth:`working_diff`."""
+        self._check_range(rev_range)
+        specs = [f":(exclude,glob){p}" for p in self.DIFF_EXCLUDES]
+        return self._git(
+            ["diff", "--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", rev_range, "--", ".", *specs]
+        ).stdout
+
+    def commit_subjects(self, rev_range: str, limit: int = 5) -> list[str]:
+        self._check_range(rev_range)
+        out = self._git(["log", f"--max-count={limit}", "--format=%s", rev_range, "--"], check=False).stdout
+        return [l.strip() for l in out.splitlines() if l.strip()]
+
     # ---------------------------------------------------------- worktrees
     @staticmethod
     def branch_name(run_id: str, task: str) -> str:
