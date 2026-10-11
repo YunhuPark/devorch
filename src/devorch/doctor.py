@@ -14,10 +14,10 @@ import yaml
 
 from devorch.config import LEVELS, devorch_dir, load_config, load_policy
 from devorch.core.execution.sandbox import load_sandbox
-from devorch.core.execution.test_runner import detect_test_command
+from devorch.core.execution.test_runner import detect_test_command, resolve_executable
 from devorch.git.manager import GitError, GitManager
 from devorch.providers.factory import CLASSES, build_registry, key_problem
-from devorch.security.command_policy import check_command
+from devorch.security.command_policy import check_command, split_command
 
 MIN_PLAUSIBLE_KEY_LEN = 20  # every vendor's real keys are far longer; a handful of characters means a failed paste
 
@@ -138,11 +138,19 @@ def run_checks(root: Path, env: Mapping[str, str] | None = None) -> list[Check]:
         out.append(Check("테스트 명령", "warn", "자동 감지하지 못함", "config.yaml 의 project.test_command 를 정하세요(테스트가 없으면 --no-tests)."))
     else:
         allowed, why = check_command(cmd, policy.allowed_commands)
-        out.append(
-            Check("테스트 명령", "ok", cmd)
-            if allowed
-            else Check("테스트 명령", "warn", f"{cmd} — {why}", "policy.yaml 의 allowed_commands 에 이 명령을 추가해야 테스트 단계가 실행됩니다.")
-        )
+        if not allowed:
+            out.append(Check("테스트 명령", "warn", f"{cmd} — {why}", "policy.yaml 의 allowed_commands 에 이 명령을 추가해야 테스트 단계가 실행됩니다."))
+        else:
+            try:
+                prog = split_command(cmd)[0]
+            except ValueError:
+                prog = ""
+            found = resolve_executable(prog, root, env) if os.name == "nt" else shutil.which(prog)
+            out.append(
+                Check("테스트 명령", "ok", f"{cmd}" + (f"  (실행 파일: {found})" if found and os.name == "nt" else ""))
+                if found
+                else Check("테스트 명령", "warn", f"{cmd} — 실행 파일 {prog!r} 을(를) PATH 에서 찾을 수 없음", "해당 도구를 설치하거나 PATH 에 추가하세요(테스트 단계가 실패합니다).")
+            )
 
     sb = load_sandbox(config)
     if not sb.enabled:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
 
@@ -24,6 +25,16 @@ class LLMResponse(BaseModel):
     output_tokens: int = 0
     cost_usd: float | None = None  # None = unknown
     latency_s: float = 0.0
+
+
+def valid_price(value) -> float | None:
+    """A per-million-token price as a float, or None if it isn't a finite number >= 0 (NaN, inf, negatives, junk).
+    A NaN/negative price would silently corrupt every cost and defeat the spend cap."""
+    try:
+        x = float(value)
+    except (TypeError, ValueError):
+        return None
+    return x if math.isfinite(x) and x >= 0 else None
 
 
 class ProviderError(RuntimeError):

@@ -7,6 +7,7 @@ import re
 import shlex
 
 _FORBIDDEN_CHARS = set(";&|`$<>\n\r(){}")
+_BATCH_META = set('%^!"')  # cmd.exe metacharacters not already in _FORBIDDEN_CHARS
 _FORBIDDEN_BINARIES = {"rm", "curl", "wget", "chmod", "chown", "sudo", "su", "dd", "mkfs", "ssh", "scp", "nc", "eval"}
 _WINDOWS_ABSOLUTE = re.compile(r"^([A-Za-z]:|\\)")  # C:\x, C:x, \x, \\server\share
 
@@ -38,6 +39,12 @@ def check_command(command: str, allowed: list[str], posix: bool | None = None) -
         return False, f"파싱 실패: {e}"
     if not tokens:
         return False, "빈 명령"
+    if (os.name == "nt") if posix is None else not posix:  # Windows-style tokenization = a Windows command
+        # Windows: npm/mvn/gradle are .cmd/.bat launchers, which run through cmd.exe — it still expands %VAR%, and ^ ! " can
+        # break out of argument quoting. Reject them instead of trying to escape (a command with such an argument is not a test run).
+        bad = next((t for t in tokens if any(c in _BATCH_META for c in t)), None)
+        if bad is not None:
+            return False, f"Windows 배치 파일 실행에서 위험한 문자(% ^ ! \")가 인자에 있음: {bad}"
     if tokens[0] in _FORBIDDEN_BINARIES:
         return False, f"금지된 실행 파일: {tokens[0]}"
 

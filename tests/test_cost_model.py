@@ -57,12 +57,12 @@ def test_input_tokens_use_one_rate_for_ascii_and_about_one_token_per_hangul_char
 
 def test_output_is_a_range_that_grows_with_the_prompt_and_the_estimate_is_the_middle():
     small, big = estimate_counts("openai", 3500, 0, {"openai": OA}), estimate_counts("openai", 35000, 0, {"openai": OA})
-    assert (small.output_low, small.output_tokens, small.output_high) == (25, 400, 800)  # 300+0.10*in / 600+0.20*in at in=1000
+    assert (small.output_low, small.output_tokens, small.output_high) == (25, 400, 1450)  # 300+0.10*in / 1200+0.25*in at in=1000
     assert big.output_tokens > small.output_tokens and big.output_high > small.output_high
     assert small.usd_low < small.usd < small.usd_high
     assert small.usd == pytest.approx((1000 * 2.0 + 400 * 10.0) / 1e6)
     g = estimate_counts("gemini", 3000, 0, {"gemini": GE})
-    assert (g.output_low, g.output_tokens, g.output_high) == (200, 1150, 2000)  # thinking tokens are in the range
+    assert (g.output_low, g.output_tokens, g.output_high) == (200, 1250, 3000)  # thinking tokens are in the range
 
 
 def test_the_output_budget_caps_the_range():
@@ -125,20 +125,31 @@ def test_formula_reproduces_the_measured_benchmark_total_within_15_percent(mode)
     assert predicted == pytest.approx(MEASURED_2026_10_09[mode], rel=0.15), (mode, predicted)
 
 
-# ---- calibration 2: REAL large diffs (reviews of this repository's own commits, 2026-10-11, HIGH) -------------
+# ---- calibration 2: REAL reviews of this repository's own commits (HIGH, openai security + gemini architecture) ----------
 # (ascii chars, non-ascii chars) of the real prompt, then per provider (actual input tokens, actual output tokens).
-# Output tokens grow with the diff; Gemini's include thinking tokens; the 5f24ce0 Gemini call was cut at 4096 and still billed.
+# Output tokens grow with the diff; Gemini's include thinking tokens.
+# Batch 1 (2026-10-11 morning) set the v2 model. Batch 2 (same day, 7 fresh reviews) was the hold-out: inputs within -2..+6% on all
+# 14 calls, outputs in range on 12/14, review totals in range on 6/7 -> the high bounds were widened (v3) and these rows added.
 LARGE = {
+    # batch 1
     "c9163fc": ((3333, 1216), {"openai": (2136, 27), "gemini": (2312, 249)}),
     "7a2ae3f": ((19009, 1118), {"openai": (6653, 907), "gemini": (7529, 3562)}),
-    "5f24ce0": ((27923, 1398), {"openai": (9145, 1566), "gemini": (None, 4096)}),  # gemini: input not reported, output cut at the cap
+    "5f24ce0 run1": ((27923, 1398), {"openai": (9145, 1566), "gemini": (None, 4096)}),  # gemini: cut at the old 4096 cap (a lower bound)
     "1e5fefa": ((32799, 1120), {"openai": (9942, 1280), "gemini": (11912, 2612)}),
+    # batch 2 (hold-out, then folded in)
+    "f5e2c94..a3e9a9e": ((7262, 681), {"openai": (2585, 897), "gemini": (2978, 3417)}),
+    "04b4338..5cac504": ((8113, 1056), {"openai": (3262, 166), "gemini": (3692, 1927)}),
+    "ec63b2d..dbb0c5a": ((15063, 1366), {"openai": (5595, 471), "gemini": (6469, 2439)}),
+    "b2222c4..fdaedad": ((23806, 1133), {"openai": (7442, 2702), "gemini": (8821, 5770)}),
+    "44755d4..7a2ae3f": ((33220, 2513), {"openai": (11959, 481), "gemini": (13614, 4314)}),
+    "c129b42..6e874f3": ((61009, 2954), {"openai": (19459, 1507), "gemini": (23129, 5298)}),
+    "5f24ce0 run2": ((27923, 1398), {"openai": (9145, 1381), "gemini": (10459, 5183)}),  # same prompt as run1, new output budget (8192)
 }
 PRICES = {"openai": OA, "gemini": GE}
 
 
 @pytest.mark.parametrize("commit", list(LARGE))
-def test_input_token_estimate_is_within_8_percent_on_real_large_diffs_including_hangul_heavy_ones(commit):
+def test_input_token_estimate_is_within_8_percent_on_real_diffs_including_hangul_heavy_ones(commit):
     (a, n), obs = LARGE[commit]
     for prov, (act_in, _) in obs.items():
         if act_in:
@@ -148,7 +159,7 @@ def test_input_token_estimate_is_within_8_percent_on_real_large_diffs_including_
 
 @pytest.mark.parametrize("commit", list(LARGE))
 def test_every_observed_output_and_cost_falls_inside_the_estimated_range(commit):
-    """IN-SAMPLE: the range was set after seeing these 7 reviews (+ the benchmark). It documents coverage; it is not a held-out
+    """IN-SAMPLE: the range was set/widened after seeing these 11 reviews (+ the benchmark). It documents coverage; it is not a held-out
     validation — new measurements must be added here, and a miss means the range needs widening, not the test loosening."""
     (a, n), obs = LARGE[commit]
     for prov, (act_in, act_out) in obs.items():

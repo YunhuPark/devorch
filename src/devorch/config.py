@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import math
 from pathlib import Path
 from typing import Any
 
@@ -58,8 +59,9 @@ class LimitsPolicy(BaseModel):
     @field_validator("max_cost_usd")
     @classmethod
     def _positive_cost(cls, v: float | None) -> float | None:
-        if v is not None and v <= 0:
-            raise ValueError("limits.max_cost_usd must be > 0 (or null for no cap)")
+        # NaN compares False with everything, so "spent >= nan" would never stop anything; inf never triggers either.
+        if v is not None and not (math.isfinite(v) and v > 0):
+            raise ValueError("limits.max_cost_usd must be a finite number > 0 (or null for no cap)")
         return v
 
 

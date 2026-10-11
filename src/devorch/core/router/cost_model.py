@@ -8,9 +8,16 @@ fitted on (per-case -5..+10%, total +2..+3%) and on 4 real 6-36KB diffs includin
 v1 single-rate formula was off by -35% on that one).
 
 OUTPUT tokens (what the model writes, thinking included) are the uncertain part: they grow with the prompt and vary a lot
-(OpenAI 27..1566, Gemini 249..4096+ on real diffs). So the estimate is a range (low / mid / high), each an affine function of the
-input size. These affine models were set by looking at 9 observations (the benchmark mean and 7 real reviews) — they document
-coverage, they are NOT a held-out validation; add new measurements to tests/test_cost_model.py and widen on a miss.
+(OpenAI 27..2702, Gemini 249..5770 on real diffs). So the estimate is a range (low / mid / high), each an affine function of the
+input size.
+
+History of the output model (so it can't be mistaken for a validated one):
+- v2 (2026-10-11 morning): set from 9 observations (benchmark mean + 4 real reviews). Then tested on 7 NEW reviews (14 calls):
+  inputs within -2..+6% on all 14; outputs inside the range on 12/14 (two heavy-finding reviews above the high bound); total cost
+  inside the range on 6/7 reviews; mid bias +8% (openai) and -17% (gemini).
+- v3 (now): high bounds widened and the gemini mid slope raised using those 7 reviews. The model is therefore IN-SAMPLE again on 11
+  real reviews + the benchmark: it documents coverage, it is NOT a validation. Test it on fresh reviews before trusting it, add
+  every new measurement to tests/test_cost_model.py, and widen (never narrow) on a miss.
 
 Not covered: the implementation step (never measured), claude (flagged assumption), diffs larger than ~12k tokens, other models.
 At analysis time the diff does not exist yet, so its size is an assumption (``assumed_prompt_counts``).
@@ -22,14 +29,16 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from devorch.providers.base import valid_price
+
 ASCII_CHARS_PER_TOKEN: dict[str, float] = {"openai": 3.5, "gemini": 3.0}
 NONASCII_TOKENS_PER_CHAR = 0.95
 ASSUMED_ASCII_CHARS_PER_TOKEN = 3.0  # providers never measured (claude)
 
 # output tokens = base + slope * input_tokens, for (low, mid, high); low is a flat floor (an answer of "[]" plus a little thinking)
 OUTPUT_MODEL: dict[str, dict[str, tuple[float, float]]] = {
-    "openai": {"low": (25, 0.0), "mid": (300, 0.10), "high": (600, 0.20)},
-    "gemini": {"low": (200, 0.0), "mid": (900, 0.25), "high": (1500, 0.50)},
+    "openai": {"low": (25, 0.0), "mid": (300, 0.10), "high": (1200, 0.25)},
+    "gemini": {"low": (200, 0.0), "mid": (900, 0.35), "high": (2500, 0.50)},
 }
 ASSUMED_OUTPUT_MODEL = {"low": (25, 0.0), "mid": (500, 0.10), "high": (1500, 0.30)}  # unmeasured providers
 CONTEXT_OVERHEAD_CHARS = 300  # task/risk/file-list header and section labels around the diff in a review prompt
@@ -96,12 +105,11 @@ def assumed_prompt_counts(task_text: str, n_direct_files: int, chars_per_file: f
 
 
 def _complete(p: Mapping[str, Any] | None) -> dict[str, float] | None:
-    if not p or "input_per_mtok" not in p or "output_per_mtok" not in p:
+    """Both prices, each a finite number >= 0 — otherwise None (unknown). NaN/negative prices never reach an estimate."""
+    if not p:
         return None
-    try:
-        return {"input_per_mtok": float(p["input_per_mtok"]), "output_per_mtok": float(p["output_per_mtok"])}
-    except (TypeError, ValueError):
-        return None
+    ip, op = valid_price(p.get("input_per_mtok")), valid_price(p.get("output_per_mtok"))
+    return None if ip is None or op is None else {"input_per_mtok": ip, "output_per_mtok": op}
 
 
 def prices_from_config(config: Mapping[str, Any]) -> dict[str, dict[str, float]]:

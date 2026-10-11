@@ -13,7 +13,7 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 설치: `python -m venv .venv` → `.venv\Scripts\Activate.ps1` → `pip install -e ".[dev,llm]"` → `pytest`. 막히면 `devorch doctor`.
 
 ## 현재 상태 (2026-10-09, 사실만)
-- **테스트: Windows 네이티브에서 389 passed, 1 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
+- **테스트: Windows 네이티브에서 421 passed, 1 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
   이 PC의 `git.exe` 실행이 간헐적으로 거부됨(WinError 5, 원인 미확정, `git/manager.py` 에 Windows 한정 재시도 완화책).
 - 구현됨: Task Analyzer / Risk Engine / Impact Analyzer / Model Router + policy.yaml / Evaluator(fail-closed) / 상태 머신 / Provider 어댑터
   (Anthropic, OpenAI, Gemini) / 실행기(git worktree) / MCP 서버 / Docker 샌드박스 / Benchmark(+LLM 판정기, solo 모드, 결함 단위 통계) / Dashboard /
@@ -27,6 +27,12 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
   - **큰 diff의 비용 예측(부분 검증)** — 2026-10-11 이 저장소의 실제 커밋 4건(6.6~36KB, HIGH)을 `devorch review` 로 측정: 입력 토큰 예측은 식을 고친 뒤 ±5%, 출력 토큰은 diff가 커질수록 늘고 편차가 커서
     점 추정(처음 −42%~+48% 오차)을 버리고 **범위**로 바꿨다. 그러나 그 범위는 *본 데이터에 맞춰 정한 것(in-sample)*이라 아직 검증이 아님 — **새 커밋으로 hold-out 검증 필요**(다음 할 일 1번).
     약 1만 2천 토큰보다 큰 diff, 구현 단계 비용(고정값 $0.05), claude 토큰 계수는 여전히 미측정.
+  - **hold-out 결과(2026-10-11, 7개 새 리뷰):** 입력 14/14 호출이 −2~+6%, 출력 범위 12/14, 리뷰 비용 범위 6/7(밖 1건은 $0.0702 대 상한 $0.0668). 상한을 넓히고 Gemini 중간값을 보정 →
+    모델은 다시 in-sample. **새 hold-out 필요.** 입력 약 4만 3천 토큰(리뷰 합계)보다 큰 diff는 미측정.
+  - **이 리뷰들이 우리 코드의 실제 문제를 찾았고, 검증 후 고쳤다(원칙: 지적을 믿지 말고 재현):** NaN/inf 비용 상한·`--max-total-usd`·음수 단가가 상한을 무력화(재현·수정), Windows 에서 `npm`/`mvn`/`gradle`(.cmd) 이
+    아예 실행되지 않던 문제(재현·수정, 인자 `% ^ ! "` 거부, PATHEXT 검색은 cwd·상대 PATH 제외), 판정기 프롬프트 주입(구분자와 "신뢰할 수 없는 데이터" 지시), 판정 JSON 파싱을 첫 유효 객체 방식으로.
+    오탐으로 판단해 테스트로 확인만 한 것: "실패한 호출의 원본 오류가 감사 로그에" — 감사 로거가 기록 시 마스킹함(테스트 추가). 문서화한 한계: 사전 상한 검사는 중간값 사용, 판정 병렬 호출은 상한을 넘을 수 있음.
+    **실제 `npm`/`mvn`/`gradle` 실행은 미검증**(가짜 .cmd 로만 검증).
   - 이 측정이 드러낸 버그를 고쳤다: **실패한(잘린) 호출의 비용이 집계·상한에서 빠졌다**(Gemini 가 생각 토큰으로 max_tokens 4096 을 소진, 청구됐지만 DevOrch 는 몰랐음). 이제 `ProviderError` 가 지출을 싣고,
     `call_provider` 가 기록한다. 리뷰어 출력 한도는 `limits.review_max_tokens`(기본 8192).
   - OpenAI 추론 토큰이 `usage.output_tokens`에 포함되는지(입력·요청 수·지출은 일치, 출력 분리는 미확인). Gemini 단가는 2027년 인상 예정(요약 표 기준, 미확인).

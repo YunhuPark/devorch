@@ -13,6 +13,7 @@ import os
 import re
 import signal
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -67,6 +68,40 @@ def safe_env(extra_blocked: set[str] | None = None) -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k not in blocked and not _SENSITIVE_ENV.search(k)}
 
 
+def resolve_executable(name: str, cwd: Path, env: Mapping[str, str], windows: bool | None = None) -> str | None:
+    """Full path of the program to run, or None if it can't be found.
+
+    POSIX: returned unchanged (exec resolves PATH). Windows: CreateProcess only auto-appends ``.exe``, so ``npm``/``mvn``/``gradle``
+    (``.cmd``/``.bat`` launchers) were never found and every JS/Java test run failed. The search honours PATHEXT, skips the
+    current directory and any relative PATH entry (a ``npm.cmd`` the AI wrote into the worktree must never win), and a relative
+    ``./gradlew`` may only resolve inside ``cwd``. Argument injection into the batch file is blocked by ``check_command``.
+    """
+    win = (os.name == "nt") if windows is None else windows
+    if not win:
+        return name
+    exts = [e for e in (env.get("PATHEXT") or ".COM;.EXE;.BAT;.CMD").split(";") if e]
+    suffix_ok = Path(name).suffix.upper() in {e.upper() for e in exts}
+    candidates = ([name] if suffix_ok else []) + [name + e for e in exts]
+    p_name = Path(name)
+    if p_name.is_absolute():
+        return next((str(Path(c)) for c in candidates if Path(c).is_file()), None)
+    if "/" in name or "\\" in name:
+        root = Path(cwd).resolve()
+        for c in candidates:
+            p = (root / c).resolve()
+            if p.is_file() and root in p.parents:
+                return str(p)
+        return None
+    for entry in (env.get("PATH") or env.get("Path") or "").split(os.pathsep):
+        if not entry or not Path(entry).is_absolute():
+            continue
+        for c in candidates:
+            p = Path(entry) / c
+            if p.is_file():
+                return str(p)
+    return None
+
+
 def _new_group_kwargs() -> dict:
     """Put the test process in its own group/session so a timeout can take its children down too."""
     if os.name == "nt":
@@ -108,11 +143,16 @@ async def run_tests(
         return TestResult(False, command, None, "", f"테스트 명령이 정책에 의해 거부됨: {why}")
 
     argv = split_command(command)
+    env = safe_env(extra_blocked_env)
+    exe = resolve_executable(argv[0], Path(cwd), env)
+    if exe is None:
+        return TestResult(False, command, None, "", f"실행 파일을 찾을 수 없음: {argv[0]}")
+    argv[0] = exe
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv,
             cwd=str(cwd),
-            env=safe_env(extra_blocked_env),
+            env=env,
             stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 from datetime import datetime
 from pathlib import Path
 
@@ -21,6 +22,13 @@ from devorch.providers.base import ProviderRegistry
 from devorch.providers.factory import build_registry
 
 bench_app = typer.Typer(help="시드 결함 벤치마크 (리뷰어가 심어둔 결함을 찾는지 측정)", no_args_is_help=True)
+
+
+def _finite_positive(value: float | None) -> float | None:
+    """A spend cap must be a finite number > 0: NaN compares False with everything, so `spent >= nan` would never stop anything."""
+    if value is not None and not (math.isfinite(value) and value > 0):
+        raise typer.BadParameter("0보다 큰 유한한 숫자여야 합니다 (nan, inf, 0, 음수는 비용 상한이 될 수 없음)")
+    return value
 
 
 def _load(cases_dir: Path | None, only: str | None):
@@ -61,7 +69,7 @@ def run_cmd(
     cases_dir: Path = typer.Option(None, "--cases-dir"),
     out: Path = typer.Option(None, "--out", help="결과 디렉터리 (기본: .devorch/bench/<시각>)"),
     claude_only: bool = typer.Option(False, "--claude-only", help="모든 리뷰어 역할을 claude 로 배정 (키 1개만 필요. 다른 회사 모델의 교차 검증은 빠짐)"),
-    max_total_usd: float = typer.Option(None, "--max-total-usd", min=0.0001, help="벤치마크 전체 비용 합계 상한(USD). 도달하면 새 케이스를 시작하지 않음. 모든 provider 단가 필요"),
+    max_total_usd: float = typer.Option(None, "--max-total-usd", callback=_finite_positive, help="벤치마크 전체 비용 합계 상한(USD). 도달하면 새 케이스를 시작하지 않음. 모든 provider 단가 필요"),
 ) -> None:
     """벤치마크를 실행해 results.json 과 report.md 를 쓴다."""
     modes = list(MODES) if mode == "both" else [m.strip() for m in mode.split(",") if m.strip()]
@@ -133,7 +141,7 @@ def judge_cmd(
     judge: str = typer.Option("claude", "--judge", help="판정에 쓸 provider: claude | openai | gemini (리뷰어와 다른 회사를 권장)"),
     cases_dir: Path = typer.Option(None, "--cases-dir"),
     yes: bool = typer.Option(False, "--yes", "-y", help="호출 확인 생략"),
-    max_total_usd: float = typer.Option(None, "--max-total-usd", min=0.0001, help="판정 비용 합계 상한(USD). 판정자 단가 필요"),
+    max_total_usd: float = typer.Option(None, "--max-total-usd", callback=_finite_positive, help="판정 비용 합계 상한(USD). 판정자 단가 필요. 병렬 호출 때문에 진행 중이던 호출분만큼 넘을 수 있음"),
 ) -> None:
     """저장된 벤치마크 결과를 LLM 판정기로 다시 판정한다 (리뷰어는 다시 호출하지 않음). 정규식 판정과 나란히 보고한다."""
     src = results_dir / "results.json"

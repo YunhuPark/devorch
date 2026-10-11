@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from devorch.providers.adapters import AnthropicProvider, GeminiProvider, OpenAIProvider
-from devorch.providers.base import LLMProvider, ProviderRegistry
+from devorch.providers.base import LLMProvider, ProviderRegistry, valid_price
 
 CLASSES: dict[str, type[LLMProvider]] = {
     "claude": AnthropicProvider,
@@ -55,8 +55,13 @@ def build_registry(
             skipped[name] = "config.yaml의 providers.%s.model 이 설정되지 않음" % name
             continue
         prices = None
-        if "input_per_mtok" in cfg and "output_per_mtok" in cfg:
-            prices = {"input_per_mtok": float(cfg["input_per_mtok"]), "output_per_mtok": float(cfg["output_per_mtok"])}
+        given = [k for k in ("input_per_mtok", "output_per_mtok") if cfg.get(k) is not None]
+        if len(given) == 2:
+            ip, op = valid_price(cfg["input_per_mtok"]), valid_price(cfg["output_per_mtok"])
+            if ip is None or op is None:
+                skipped[name] = f"providers.{name} 의 단가가 올바르지 않음(input_per_mtok / output_per_mtok 는 0 이상의 유한한 숫자여야 함)"
+                continue
+            prices = {"input_per_mtok": ip, "output_per_mtok": op}
         try:
             registry.register(cls(model=model, api_key=api_key, name=name, prices=prices))
         except ImportError as e:
