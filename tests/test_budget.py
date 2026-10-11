@@ -442,3 +442,24 @@ async def test_the_engine_passes_the_policy_budget_to_its_reviewers(tmp_path):
     pol = Policy.model_validate({"limits": {"review_max_tokens": 6000}})
     await WorkflowEngine(tmp_path, pol, registry(openai=openai), approver=lambda r: True).run(HIGH_TASK)
     assert openai.calls and all(c.max_tokens == 6000 for c in openai.calls)
+
+
+# ---- per-role usage: the implementation step can finally be measured on its own ----------------------------
+async def test_usage_is_also_tracked_per_role_including_failed_calls_and_unknown_costs():
+    from devorch.providers.base import ProviderError
+
+    run = make_run()
+    reg = registry(openai=FakeProvider("openai", ["[]"], cost=0.01), claude=FakeProvider("claude", ["diff"], cost=0.05))
+    impl, review = RoutingStep(role="implementation", provider="claude", purpose="i"), RoutingStep(role="review", provider="openai", purpose="r")
+    await call_provider(run, reg, AuditLogger(None), impl, LLMRequest(role="implementation", prompt="x"))
+    await call_provider(run, reg, AuditLogger(None), review, LLMRequest(role="review", prompt="x"))
+    await call_provider(run, reg, AuditLogger(None), review, LLMRequest(role="review", prompt="x"))
+    assert run.role_usage["implementation"] == {"calls": 1, "input_tokens": 100, "output_tokens": 50, "cost_usd": pytest.approx(0.05)}
+    assert run.role_usage["review"] == {"calls": 2, "input_tokens": 200, "output_tokens": 100, "cost_usd": pytest.approx(0.02)}
+    with pytest.raises(ProviderError):
+        await call_provider(run, registry(openai=Truncating("openai", ["x"])), AuditLogger(None), review, LLMRequest(role="review", prompt="x"))
+    assert run.role_usage["review"]["calls"] == 3 and run.role_usage["review"]["cost_usd"] == pytest.approx(0.02 + 0.0222)
+
+    unpriced = make_run()
+    await call_provider(unpriced, registry(openai=FakeProvider("openai", ["[]"], priced=False)), AuditLogger(None), review, LLMRequest(role="review", prompt="x"))
+    assert unpriced.role_usage["review"]["cost_usd"] is None  # unknown, never 0

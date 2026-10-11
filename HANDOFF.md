@@ -13,7 +13,7 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 설치: `python -m venv .venv` → `.venv\Scripts\Activate.ps1` → `pip install -e ".[dev,llm]"` → `pytest`. 막히면 `devorch doctor`.
 
 ## 현재 상태 (2026-10-09, 사실만)
-- **테스트: Windows 네이티브에서 421 passed, 1 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
+- **테스트: Windows 네이티브에서 439 passed, 1 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
   이 PC의 `git.exe` 실행이 간헐적으로 거부됨(WinError 5, 원인 미확정, `git/manager.py` 에 Windows 한정 재시도 완화책).
 - 구현됨: Task Analyzer / Risk Engine / Impact Analyzer / Model Router + policy.yaml / Evaluator(fail-closed) / 상태 머신 / Provider 어댑터
   (Anthropic, OpenAI, Gemini) / 실행기(git worktree) / MCP 서버 / Docker 샌드박스 / Benchmark(+LLM 판정기, solo 모드, 결함 단위 통계) / Dashboard /
@@ -60,8 +60,10 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 ## 지금 할 일 (우선순위)
 1. **비용 범위의 hold-out 검증**: 4건으로 정한 출력 범위를 *새로운* 커밋 6~8개(`devorch review --git-range <커밋>~1..<커밋> --task "코드 변경 리뷰" --level high`)에 적용해 실제 값이 범위 안에 드는 비율을 센다.
    자격증명 형태 문자열(테스트용 가짜 키)이 든 커밋은 우리 검사가 거부하니 제외. 밖이면 범위를 넓히고(테스트 `LARGE` 에 관측값 추가) 좁히지 않는다. 더 큰 diff(1만 2천 토큰 초과)도 최소 1건.
-2. **Claude Code 실연결**: `..\devorch-playground` 를 VS Code로 열어 `.mcp.json` 서버를 승인하고 전체 흐름을 한 번 돌린다. 막히는 곳은 `devorch doctor` 출력에 반영.
-3. **구현 단계 비용 실측**: `devorch run`(구현 포함)을 소액으로 실행해 구현 호출의 입출력 토큰을 기록, `policy.estimates.cost_usd` 고정값 대체.
+2. **Claude Code 실연결**: `..\devorch-playground` 를 IDE로 열어 `.mcp.json`(venv python -m devorch, `--mock`)의 서버를 승인하고 `CLAUDE.md` 의 흐름으로 전체를 한 번 돌린다(우리가 한 검증은 stdio 하위 프로세스까지).
+   막히는 곳은 `devorch doctor` 출력/README 에 반영. 결과를 받으면 mock 을 빼고 실제 리뷰로도 한 번.
+3. **구현 단계 비용 실측**: `devorch run`(구현 포함)을 소액으로 실행. 이제 출력이 구현 단계/리뷰 단계별 호출·토큰·비용과 예상을 따로 보여준다(`WorkflowRun.role_usage`).
+   여러 작업(작은 것~중간)으로 모아 `policy.estimates.cost_usd` 의 구현 고정값($0.05, 실측 없음)을 대체. `--apply` 없이도 구현 모델이 HEAD 파일 내용을 받도록 고쳤다(이전엔 --apply 일 때만 → diff 가 어긋남).
 4. **현실적 평가 세트**: 시드 결함 대신 실제 오픈소스 버그 수정 커밋(알려진 버그)으로 탐지율·비용 평가. 판정은 사람 확인이 섞인 정답 라벨 필요.
 5. 위 데이터로 HIGH 기본 정책(리뷰어 3명)을 재검토: 단일 교차 회사 리뷰어 + 초점 프롬프트가 같은 탐지를 3분의 1 비용에 하는지. CRITICAL 의 독립 리뷰어 2명은 비용이 아니라 통제 규칙이라 측정만으로 바꾸지 않는다.
 6. 포트폴리오 케이스 스터디의 "미검증" 항목을 실측으로 갱신. 한계를 숨기지 않는 것이 강점.

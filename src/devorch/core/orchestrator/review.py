@@ -131,6 +131,11 @@ def _account(
     u["output_tokens"] += out_tok
     if error is not None:
         u["failed_calls"] = u.get("failed_calls", 0) + 1
+    r = run.role_usage.setdefault(step.role, {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0})
+    r["calls"] += 1
+    r["input_tokens"] += in_tok
+    r["output_tokens"] += out_tok
+    r["cost_usd"] = None if (cost_usd is None or r["cost_usd"] is None) else r["cost_usd"] + cost_usd  # one unknown makes the role's cost unknown
     record = {
         "role": step.role, "provider": step.provider, "model": model,
         "input_tokens": in_tok, "output_tokens": out_tok,

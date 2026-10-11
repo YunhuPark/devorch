@@ -199,3 +199,59 @@ def test_python_dash_m_devorch_runs_the_same_cli(tmp_path):
     assert r.returncode == 0 and "--max-total-usd" in r.stdout
     r = subprocess.run([sys.executable, "-m", "devorch", "providers", "-p", str(tmp_path)], capture_output=True, text=True, encoding="utf-8", cwd=tmp_path)
     assert r.returncode == 0 and "claude" in r.stdout
+
+
+# ---- `devorch run`: the implementer sees the real files (not only with --apply) and the cost is reported ----------
+def _git_repo(tmp_path):
+    import subprocess
+
+    def git(*a):
+        subprocess.run(["git", *a], cwd=tmp_path, check=True, capture_output=True, text=True, encoding="utf-8")
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "T")
+    (tmp_path / "calc.py").write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
+    git("add", "-A")
+    git("commit", "-q", "-m", "init")
+
+
+def _capture_engine(monkeypatch):
+    import devorch.cli.main as m
+
+    seen = []
+
+    class Spy(m.WorkflowEngine):
+        def __init__(self, *a, **kw):
+            seen.append(kw.get("context_provider"))
+            super().__init__(*a, **kw)
+
+    monkeypatch.setattr(m, "WorkflowEngine", Spy)
+    return seen
+
+
+def test_run_without_apply_still_gives_the_implementer_the_real_file_contents(tmp_path, monkeypatch):
+    _git_repo(tmp_path)
+    seen = _capture_engine(monkeypatch)
+    r = CliRunner().invoke(app, ["run", "calc.py add 버그 수정", "-p", str(tmp_path), "--mock"])
+    assert r.exit_code == 0, r.output
+    assert seen and seen[0] is not None
+    from devorch.core.orchestrator.engine import WorkflowRun
+    from devorch.models import ImpactReport
+
+    ctx = seen[0](WorkflowRun(task_text="t", impact=ImpactReport(direct_files=["calc.py"])))
+    assert "return a - b" in ctx  # the file as of HEAD, read-only: nothing was applied or created
+    assert not list((tmp_path / ".devorch").glob("worktrees/*")) and (tmp_path / "calc.py").read_text(encoding="utf-8") == "def add(a, b):\n    return a - b\n"
+
+
+def test_run_outside_a_git_repository_says_the_implementer_cannot_see_files(tmp_path, monkeypatch):
+    seen = _capture_engine(monkeypatch)
+    r = CliRunner().invoke(app, ["run", "버튼 텍스트 변경", "-p", str(tmp_path), "--mock"])
+    assert r.exit_code == 0, r.output
+    assert seen[0] is None and "파일 내용" in r.output  # honest about it instead of silently sending nothing
+
+
+def test_run_reports_tokens_per_step_and_the_estimate_next_to_the_actual_cost(tmp_path):
+    r = CliRunner().invoke(app, ["run", "로그인 JWT 인증 추가", "-p", str(tmp_path), "--mock", "--yes"])
+    assert r.exit_code == 0, r.output
+    assert "구현 단계" in r.output and "토큰" in r.output and "예상" in r.output

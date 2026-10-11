@@ -109,7 +109,7 @@ src/devorch/
 ├── cli/main.py
 ├── config.py  audit.py  models.py
 bench/          # (src/devorch/bench) 케이스·채점·러너·리포트, cases/*.yaml
-tests/              # 421 tests + 1 skip (Windows에서 symlink 권한이 없으면 skip)
+tests/              # 439 tests + 1 skip (Windows에서 symlink 권한이 없으면 skip)
 examples/demo-spring/   # 영향 분석 시연용 작은 Java 프로젝트
 ```
 
@@ -143,6 +143,14 @@ devorch mcp -p /path/to/project            # stdio 서버 (연결 테스트: --m
 # Claude Code 등록 예 (일반적인 형태이며 정확한 옵션은 `claude mcp add --help` 로 확인):
 claude mcp add devorch -- devorch mcp -p /path/to/project
 ```
+프로젝트 루트의 `.mcp.json` 으로 등록할 수도 있습니다. 설치된 `devorch` 실행 파일이 말을 안 듣는 환경(우리 Windows 에서 겪음)을 피하려면 **venv 의 python 으로 모듈을 실행**하세요:
+```json
+{"mcpServers": {"devorch": {"command": "C:\\path\\to\\.venv\\Scripts\\python.exe", "args": ["-m", "devorch", "mcp", "-p", "C:\\path\\to\\project", "--mock"]}}}
+```
+(`--mock` 은 가짜 리뷰어라 비용이 없는 연결 시험용입니다. 실제 리뷰를 받으려면 빼세요. `devorch doctor` 의 "MCP 등록" 줄이 이 프로젝트용 명령을 만들어 줍니다.)
+에이전트가 도구를 올바른 순서로 쓰게 하려면 프로젝트의 `CLAUDE.md` 에 흐름을 적어 두세요(분석 → 구현(커밋 금지) → 리뷰 → 테스트 → 적용, `approval_required` 면 멈추고 사람이 터미널에서
+`devorch approve <task_id>`; 승인을 대신하지 않기; diff 가 바뀌면 리뷰·테스트를 다시). 예시는 `devorch-playground/CLAUDE.md` 를 참고하세요.
+**실제 Claude Code 앱에서의 연결은 아직 검증하지 못했습니다**(stdio 하위 프로세스로는 검증됨).
 
 에이전트(Claude)가 따르는 흐름 — 코드는 **에이전트가 자기 작업 트리에서 작성**하고, DevOrch는 무엇이 반영될 수 있는지만 통제합니다.
 

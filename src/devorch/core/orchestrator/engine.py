@@ -68,6 +68,8 @@ class WorkflowRun(BaseModel):
     # provider -> {"calls", "input_tokens", "output_tokens"}; kept even when no prices are configured,
     # so a cost can be computed later from the tokens.
     usage: dict[str, dict[str, int]] = Field(default_factory=dict)
+    # role -> {"calls", "input_tokens", "output_tokens", "cost_usd" (None = unknown)}: the implementation step on its own
+    role_usage: dict[str, dict[str, float | int | None]] = Field(default_factory=dict)
     branch: str | None = None
     worktree: str | None = None
     commit: str | None = None
@@ -202,7 +204,7 @@ class WorkflowEngine:
             if asyncio.iscoroutine(res):
                 await res
         else:
-            run.notes.append("apply 단계 생략: 코드 적용기(git worktree)는 아직 연결되지 않음")
+            run.notes.append("apply 단계 생략: --apply 를 주지 않아 아무것도 적용하지 않음(제안된 diff 만 저장)")
 
         if plan.run_tests:
             self._move(run, State.TESTING)
@@ -213,7 +215,7 @@ class WorkflowEngine:
                 if not ok:
                     return self._fail(run, f"테스트 실패: {run.test_summary}" if run.test_summary else "테스트 실패")
             else:
-                run.notes.append("test 단계 생략: 테스트 러너는 아직 연결되지 않음")
+                run.notes.append("test 단계 생략: --apply 를 주지 않아 테스트를 실행하지 않음")
 
         if self.commit_hook:
             res = self.commit_hook(run)

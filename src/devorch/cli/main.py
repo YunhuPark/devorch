@@ -157,8 +157,24 @@ def _print_run(run: WorkflowRun) -> None:
         typer.echo("  (현재 브랜치는 건드리지 않았습니다. 검토 후 직접 merge 하거나 브랜치를 삭제하세요.)")
     elif run.worktree:
         typer.echo(f"  Worktree 보존: {run.worktree}  (branch {run.branch})")
-    cost = "unknown" if run.cost_unknown else f"${run.total_cost_usd:.2f}"
-    typer.echo(f"  Cost: {cost}")
+    cost = "unknown" if run.cost_unknown else f"${run.total_cost_usd:.4f}"
+    plan = run.plan
+    if plan:
+        lo, hi = plan.estimated_cost_low_usd, plan.estimated_cost_high_usd
+        est = f"예상 ${plan.estimated_cost_usd:.4f}" + (f" (범위 ${lo:.4f}~${hi:.4f})" if hi > lo else "")
+        typer.echo(f"  Cost: {cost}   [{est}; 구현 단계는 고정값이며 수정 라운드(rounds={run.rounds})는 예상에 한 번만 들어 있음]")
+    else:
+        typer.echo(f"  Cost: {cost}")
+    for role, u in run.role_usage.items():
+        c = u["cost_usd"]
+        label = "구현 단계" if role == "implementation" else f"리뷰 {role}"
+        typer.echo(
+            f"    - {label}: 호출 {u['calls']}회, 토큰 입력 {u['input_tokens']:,} / 출력 {u['output_tokens']:,}, "
+            + ("비용 unknown(단가 없음)" if c is None else f"비용 ${c:.4f}")
+        )
+    failed = {p: v["failed_calls"] for p, v in run.usage.items() if v.get("failed_calls")}
+    if failed:
+        typer.echo("    ※ 실패한 호출도 청구됨: " + ", ".join(f"{p} {n}회" for p, n in failed.items()))
 
 
 @app.command()
@@ -236,6 +252,13 @@ def run(
             raise typer.Exit(1)
 
     executor = None
+    # Even without --apply the implementer must SEE the files (as of HEAD, read-only) or it can only guess context lines
+    # and the diff it writes won't apply. Without --apply nothing is applied, tested or created.
+    reader = Executor(path, policy, skip_tests=True)
+    try:
+        reader.ensure_ready()
+    except ExecutionError:
+        reader = None
     if apply:
         executor = Executor(
             path,
@@ -253,6 +276,8 @@ def run(
         if executor.git.is_dirty():
             typer.echo("※ 작업 트리에 커밋되지 않은 변경이 있습니다. AI는 HEAD 기준으로 작업하며 그 변경은 보이지 않습니다.")
         typer.echo("※ 테스트는 샌드박스 없이 이 컴퓨터에서 실행됩니다(키/토큰 환경변수는 제거, allowlist 명령만 허용).")
+    if reader is None:
+        typer.echo("※ git 저장소(최상위, 커밋 있음)가 아니라 구현 모델에 파일 내용을 보내지 못합니다 — 만들어진 diff가 실제 파일과 맞지 않을 수 있습니다.")
 
     audit = AuditLogger(devorch_dir(path) / "audit.jsonl")
 
@@ -266,7 +291,7 @@ def run(
         apply_hook=executor.apply if executor else None,
         test_hook=executor.test if executor else None,
         commit_hook=executor.commit if executor else None,
-        context_provider=executor.file_context if executor else None,
+        context_provider=(executor or reader).file_context if (executor or reader) else None,
     )
     result = asyncio.run(engine.run(task))
     if not apply and result.state.value == "COMPLETED":
