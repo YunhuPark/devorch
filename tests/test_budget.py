@@ -364,3 +364,81 @@ def test_report_failure_reasons_are_redacted():
     rs = [result(c, False, [f"[{c.id}] review(claude) 호출 실패: AuthError: bad key {leak}"]) for c in CASES]
     text = render_report(CASES, rs, ["single"], mock=False, repeats=1)
     assert leak not in text and "AuthError" in text
+
+
+# ---- failed calls: tokens already spent must reach the cost accounting and the cap --------------------------
+class Truncating(FakeProvider):
+    async def generate(self, request):
+        from devorch.providers.base import ProviderError
+
+        self.calls.append(request)
+        raise ProviderError(f"{self.name}: 응답이 max_tokens({request.max_tokens})에서 잘림", 9000, 4096, 0.0222, truncated=True)
+
+
+async def test_a_truncated_call_is_still_counted_in_cost_usage_and_audit(tmp_path):
+    from devorch.providers.base import ProviderError
+
+    run = make_run()
+    audit = AuditLogger(tmp_path / "a.jsonl")
+    with pytest.raises(ProviderError):
+        await call_provider(run, registry(openai=Truncating("openai", ["x"])), audit, STEP, LLMRequest(role="review", prompt="x"))
+    assert run.total_cost_usd == pytest.approx(0.0222) and not run.cost_unknown
+    assert run.usage["openai"] == {"calls": 1, "input_tokens": 9000, "output_tokens": 4096, "failed_calls": 1}
+    (ev,) = events(tmp_path / "a.jsonl", "llm_call")
+    assert ev["data"]["failed"] is True and ev["data"]["output_tokens"] == 4096 and "잘림" in ev["data"]["error"]
+
+
+async def test_the_cap_sees_money_spent_on_a_failed_call():
+    from devorch.providers.base import ProviderError
+
+    run = make_run()
+    reg = registry(openai=Truncating("openai", ["x"]))
+    with pytest.raises(ProviderError):
+        await call_provider(run, reg, AuditLogger(None), STEP, LLMRequest(role="review", prompt="x"), max_cost_usd=0.02)
+    with pytest.raises(BudgetExceeded):  # 0.0222 spent on the failed call >= 0.02
+        await call_provider(run, registry(openai=FakeProvider("openai", ["[]"])), AuditLogger(None), STEP, LLMRequest(role="review", prompt="x"), max_cost_usd=0.02)
+
+
+async def test_a_failed_call_with_unknown_price_makes_the_run_cost_unknown():
+    from devorch.providers.base import ProviderError
+
+    class NoPrice(FakeProvider):
+        async def generate(self, request):
+            raise ProviderError("x", 100, 50, None)
+
+    run = make_run()
+    with pytest.raises(ProviderError):
+        await call_provider(run, registry(openai=NoPrice("openai", ["x"])), AuditLogger(None), STEP, LLMRequest(role="review", prompt="x"))
+    assert run.cost_unknown and run.usage["openai"]["failed_calls"] == 1
+
+
+async def test_a_truncated_review_is_incomplete_costs_money_and_tells_the_user_what_to_change():
+    run = make_run()
+    findings, completed = await run_reviews(run, [STEP], registry(openai=Truncating("openai", ["x"])), AuditLogger(None))
+    assert completed == [] and run.total_cost_usd == pytest.approx(0.0222)
+    (note,) = [n for n in run.notes if "호출 실패" in n]
+    assert "limits.review_max_tokens" in note
+
+
+# ---- reviewers get an output budget that big diffs can fit in ------------------------------------------------
+def test_review_max_tokens_has_a_roomy_default_and_validation():
+    assert Policy().limits.review_max_tokens == 8192
+    for bad in (0, 512, -1):
+        with pytest.raises(ValueError):
+            Policy.model_validate({"limits": {"review_max_tokens": bad}})
+
+
+async def test_reviews_are_requested_with_the_configured_output_budget():
+    openai = FakeProvider("openai", ["[]"])
+    await run_reviews(make_run(), [STEP], registry(openai=openai), AuditLogger(None), max_tokens=12000)
+    assert openai.calls[0].max_tokens == 12000
+    default = FakeProvider("openai", ["[]"])
+    await run_reviews(make_run(), [STEP], registry(openai=default), AuditLogger(None))
+    assert default.calls[0].max_tokens == 4096  # unchanged when no budget is passed
+
+
+async def test_the_engine_passes_the_policy_budget_to_its_reviewers(tmp_path):
+    openai = FakeProvider("openai", ["[]"])
+    pol = Policy.model_validate({"limits": {"review_max_tokens": 6000}})
+    await WorkflowEngine(tmp_path, pol, registry(openai=openai), approver=lambda r: True).run(HIGH_TASK)
+    assert openai.calls and all(c.max_tokens == 6000 for c in openai.calls)

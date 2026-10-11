@@ -1,4 +1,8 @@
-"""Token-based cost estimates (replacing the flat per-call guesses) and their honesty about what is measured."""
+"""Token-based cost estimates and their honesty about what is measured.
+
+v2 (2026-10-11): input tokens count ASCII and non-ASCII (Hangul) characters separately, and output tokens are a RANGE
+(low / mid / high) that grows with the prompt — a flat output guess was off by up to 42% on real 6-36KB diffs.
+"""
 
 import json
 import sys
@@ -18,9 +22,10 @@ from devorch.core.execution.executor import Executor
 from devorch.core.orchestrator.engine import WorkflowRun
 from devorch.core.orchestrator.review import REVIEWER_SYSTEM, build_review_prompt
 from devorch.core.router.cost_model import (
-    ASSUMED_CHARS_PER_TOKEN,
-    ASSUMED_OUTPUT_TOKENS,
+    ASSUMED_ASCII_CHARS_PER_TOKEN,
+    count_chars,
     estimate_call,
+    estimate_counts,
     merge_prices,
     prices_from_config,
     prices_from_registry,
@@ -39,28 +44,47 @@ HIGH_TASK = "로그인 JWT 인증 추가"
 
 
 # ---- the formula -----------------------------------------------------------------------------------
-def test_estimate_uses_the_measured_coefficients_for_openai_and_gemini():
-    e = estimate_call("openai", 3360, {"openai": OA})
-    assert (e.input_tokens, e.output_tokens, e.measured) == (1000, 317, True)
-    assert e.usd == pytest.approx((1000 * 2.0 + 317 * 10.0) / 1e6)
-    g = estimate_call("gemini", 3010, {"gemini": GE})
-    assert (g.input_tokens, g.output_tokens, g.measured) == (1000, 979, True)  # Gemini's output includes thinking tokens
+def test_count_chars_splits_ascii_from_everything_else():
+    assert count_chars("abc 가나다 é") == (5, 4)  # a b c and two spaces / 가 나 다 é
 
 
-def test_an_unmeasured_provider_gets_flagged_assumptions_not_silent_ones():
-    e = estimate_call("claude", 3000, {"claude": CL})
-    assert not e.measured
-    assert (e.input_tokens, e.output_tokens) == (round(3000 / ASSUMED_CHARS_PER_TOKEN), ASSUMED_OUTPUT_TOKENS)
+def test_input_tokens_use_one_rate_for_ascii_and_about_one_token_per_hangul_char():
+    e = estimate_counts("openai", 3500, 0, {"openai": OA})
+    assert e.input_tokens == 1000 and e.measured
+    assert estimate_counts("openai", 0, 1000, {"openai": OA}).input_tokens == 950
+    assert estimate_counts("gemini", 3000, 0, {"gemini": GE}).input_tokens == 1000  # gemini counts more tokens per ascii char
+
+
+def test_output_is_a_range_that_grows_with_the_prompt_and_the_estimate_is_the_middle():
+    small, big = estimate_counts("openai", 3500, 0, {"openai": OA}), estimate_counts("openai", 35000, 0, {"openai": OA})
+    assert (small.output_low, small.output_tokens, small.output_high) == (25, 400, 800)  # 300+0.10*in / 600+0.20*in at in=1000
+    assert big.output_tokens > small.output_tokens and big.output_high > small.output_high
+    assert small.usd_low < small.usd < small.usd_high
+    assert small.usd == pytest.approx((1000 * 2.0 + 400 * 10.0) / 1e6)
+    g = estimate_counts("gemini", 3000, 0, {"gemini": GE})
+    assert (g.output_low, g.output_tokens, g.output_high) == (200, 1150, 2000)  # thinking tokens are in the range
+
+
+def test_the_output_budget_caps_the_range():
+    e = estimate_counts("gemini", 60000, 0, {"gemini": GE}, max_output_tokens=4096)
+    assert e.output_high == 4096 and e.output_tokens <= 4096
+    assert estimate_counts("gemini", 60000, 0, {"gemini": GE}).output_high > 4096
+
+
+def test_an_unmeasured_provider_is_flagged_not_silently_assumed():
+    e = estimate_counts("claude", 3000, 0, {"claude": CL})
+    assert not e.measured and e.input_tokens == round(3000 / ASSUMED_ASCII_CHARS_PER_TOKEN)
 
 
 @pytest.mark.parametrize("prices", [None, {}, {"openai": {"input_per_mtok": 2.0}}, {"gemini": GE}])
 def test_missing_or_incomplete_prices_mean_no_estimate_never_zero(prices):
-    assert estimate_call("openai", 3360, prices).usd is None
+    e = estimate_counts("openai", 3500, 0, prices)
+    assert e.usd is None and e.usd_low is None and e.usd_high is None
+    assert e.input_tokens == 1000  # the token estimate itself doesn't need a price
 
 
-def test_bigger_prompts_cost_more_and_the_estimate_is_linear_in_the_input():
-    a, b = estimate_call("openai", 3000, {"openai": OA}), estimate_call("openai", 6000, {"openai": OA})
-    assert b.usd > a.usd and b.output_tokens == a.output_tokens and b.input_tokens == 2 * a.input_tokens
+def test_estimate_call_counts_the_text_it_is_given():
+    assert estimate_call("openai", "x" * 3500, {"openai": OA}).input_tokens == 1000
 
 
 def test_prices_come_from_config_and_from_registered_adapters_and_the_registry_wins():
@@ -75,9 +99,8 @@ def test_prices_come_from_config_and_from_registered_adapters_and_the_registry_w
     assert merge_prices({"claude": CL}, other)["claude"]["input_per_mtok"] == 9.0  # later sources override
 
 
-# ---- calibration: the numbers must reproduce what was measured ----------------------------------------
-# Measured on 2026-10-09 (16 cases, 1 repeat, GPT $2/$10 and Gemini $0.75/$3.75 per Mtok). The coefficients were fitted on a
-# DIFFERENT run (2026-10-08, 11 cases) — this is a held-out check. If the cases' task/diff text changes, recalibrate.
+# ---- calibration 1: benchmark totals (small diffs) ---------------------------------------------------
+# Measured 2026-10-09 (16 cases, 1 repeat; GPT $2/$10, Gemini $0.75/$3.75 per Mtok). If a case's task/diff text changes, recalibrate.
 MEASURED_2026_10_09 = {"multi": 0.1751, "single": 0.0567, "solo:gemini:review": 0.0613, "solo:openai:architecture": 0.0535}
 MODE_STEPS = {
     "multi": [("security", "openai"), ("architecture", "gemini"), ("review", "openai")],
@@ -87,24 +110,60 @@ MODE_STEPS = {
 }
 
 
-def prompt_chars(case, role):
+def prompt_text(case, role):
     a = analyze_task(case.task)
     i = ImpactReport(direct_files=list(case.files))
     run = WorkflowRun(task_text=case.task, analysis=a, impact=i, risk=assess_risk(a, i), implementation=case.diff)
     step = review_steps(Policy(), "single")[0].model_copy(update={"role": role, "purpose": role})
-    return len(REVIEWER_SYSTEM) + len(build_review_prompt(run, step))
+    return REVIEWER_SYSTEM + build_review_prompt(run, step)
 
 
 @pytest.mark.parametrize("mode", list(MODE_STEPS))
-def test_formula_reproduces_the_measured_total_cost_within_15_percent(mode):
+def test_formula_reproduces_the_measured_benchmark_total_within_15_percent(mode):
     prices = {"openai": OA, "gemini": GE}
-    predicted = sum(estimate_call(p, prompt_chars(c, role), prices).usd for c in load_cases() for role, p in MODE_STEPS[mode])
+    predicted = sum(estimate_call(p, prompt_text(c, role), prices).usd for c in load_cases() for role, p in MODE_STEPS[mode])
     assert predicted == pytest.approx(MEASURED_2026_10_09[mode], rel=0.15), (mode, predicted)
 
 
-def test_the_old_flat_estimate_was_far_off_which_is_why_it_was_replaced():
-    flat = len(load_cases()) * (0.03 + 0.02 + 0.03)  # old defaults: openai 0.03, gemini 0.02, openai 0.03 per multi case
-    assert flat > 3 * MEASURED_2026_10_09["multi"]
+# ---- calibration 2: REAL large diffs (reviews of this repository's own commits, 2026-10-11, HIGH) -------------
+# (ascii chars, non-ascii chars) of the real prompt, then per provider (actual input tokens, actual output tokens).
+# Output tokens grow with the diff; Gemini's include thinking tokens; the 5f24ce0 Gemini call was cut at 4096 and still billed.
+LARGE = {
+    "c9163fc": ((3333, 1216), {"openai": (2136, 27), "gemini": (2312, 249)}),
+    "7a2ae3f": ((19009, 1118), {"openai": (6653, 907), "gemini": (7529, 3562)}),
+    "5f24ce0": ((27923, 1398), {"openai": (9145, 1566), "gemini": (None, 4096)}),  # gemini: input not reported, output cut at the cap
+    "1e5fefa": ((32799, 1120), {"openai": (9942, 1280), "gemini": (11912, 2612)}),
+}
+PRICES = {"openai": OA, "gemini": GE}
+
+
+@pytest.mark.parametrize("commit", list(LARGE))
+def test_input_token_estimate_is_within_8_percent_on_real_large_diffs_including_hangul_heavy_ones(commit):
+    (a, n), obs = LARGE[commit]
+    for prov, (act_in, _) in obs.items():
+        if act_in:
+            est = estimate_counts(prov, a, n, PRICES).input_tokens
+            assert abs(est - act_in) / act_in < 0.08, (commit, prov, est, act_in)
+
+
+@pytest.mark.parametrize("commit", list(LARGE))
+def test_every_observed_output_and_cost_falls_inside_the_estimated_range(commit):
+    """IN-SAMPLE: the range was set after seeing these 7 reviews (+ the benchmark). It documents coverage; it is not a held-out
+    validation — new measurements must be added here, and a miss means the range needs widening, not the test loosening."""
+    (a, n), obs = LARGE[commit]
+    for prov, (act_in, act_out) in obs.items():
+        e = estimate_counts(prov, a, n, PRICES, max_output_tokens=8192)
+        assert e.output_low <= act_out <= e.output_high, (commit, prov, e.output_low, act_out, e.output_high)
+        if act_in:
+            p = PRICES[prov]
+            actual = (act_in * p["input_per_mtok"] + act_out * p["output_per_mtok"]) / 1e6
+            assert e.usd_low <= actual <= e.usd_high, (commit, prov, e.usd_low, actual, e.usd_high)
+
+
+def test_the_old_flat_output_guess_was_wrong_for_big_diffs_which_is_why_the_range_exists():
+    (a, n), obs = LARGE["7a2ae3f"]
+    flat_out = {"openai": 317, "gemini": 979}  # the v1 constants
+    assert obs["gemini"][1] > 3 * flat_out["gemini"] and obs["openai"][1] > 2 * flat_out["openai"]
 
 
 # ---- the plan ---------------------------------------------------------------------------------------------
@@ -114,21 +173,32 @@ def plan(task=HIGH_TASK, files=("a.py",), prices=None, policy=None):
     return plan_routing(analysis, assess_risk(analysis, impact), impact, policy or Policy(), prices=prices)
 
 
-def test_without_prices_the_plan_is_exactly_the_old_flat_estimate():
+def test_without_prices_the_plan_is_exactly_the_old_flat_estimate_with_no_range():
     p = plan()
     assert p.estimated_cost_usd == pytest.approx(0.05 + 0.03 + 0.02)
+    assert p.estimated_cost_low_usd == p.estimated_cost_high_usd == p.estimated_cost_usd
     assert {line.basis for line in p.cost_breakdown} == {"기본 고정값"}
     assert any("고정값" in n for n in p.notes)
 
 
-def test_with_prices_reviewers_are_token_based_and_implementation_stays_flagged_as_a_default():
+def test_with_prices_reviewers_are_token_based_with_a_range_and_implementation_stays_a_flagged_default():
     p = plan(prices={"openai": OA, "gemini": GE})
     by = {line.role: line for line in p.cost_breakdown}
     assert by["implementation"].basis == "기본 고정값" and by["implementation"].usd == pytest.approx(0.05)
+    assert by["implementation"].usd_low == by["implementation"].usd_high == by["implementation"].usd  # no range for an unmeasured step
     assert by["security"].basis == "토큰×단가" and by["architecture"].basis == "토큰×단가"
+    assert by["security"].usd_low < by["security"].usd < by["security"].usd_high
     assert p.estimated_cost_usd == pytest.approx(sum(line.usd for line in p.cost_breakdown))
-    assert p.estimated_cost_usd < 0.10  # reviewers are now ~$0.005 each instead of $0.02-0.03
-    assert any("가정" in n and "diff" in n for n in p.notes)  # the diff size is an assumption at analysis time
+    assert p.estimated_cost_low_usd < p.estimated_cost_usd < p.estimated_cost_high_usd
+    assert p.estimated_cost_usd < 0.10
+    assert any("가정" in n and "diff" in n and "범위" in n for n in p.notes)
+
+
+def test_the_plan_respects_the_review_output_budget_in_its_range():
+    pol = Policy.model_validate({"limits": {"review_max_tokens": 1024}})
+    capped = plan(files=[f"f{i}.py" for i in range(40)], prices={"openai": OA, "gemini": GE}, policy=pol)
+    roomy = plan(files=[f"f{i}.py" for i in range(40)], prices={"openai": OA, "gemini": GE})
+    assert capped.estimated_cost_high_usd < roomy.estimated_cost_high_usd
 
 
 def test_a_priced_but_unmeasured_provider_is_labelled_as_an_assumption():
@@ -175,35 +245,39 @@ def make_plane(repo, config):
     return ControlPlane(repo, pol, config, reg, Executor(repo, pol, test_command=PYTEST_CMD))
 
 
-def test_service_analyze_reports_a_token_based_estimate_with_its_breakdown(repo):
+def test_service_analyze_reports_a_token_based_estimate_with_its_breakdown_and_range(repo):
     cfg = {"providers": {"openai": OA, "gemini": GE}}
     priced = make_plane(repo, cfg).analyze_task(HIGH_TASK + " calc.py")
     flat = make_plane(repo, {}).analyze_task(HIGH_TASK + " calc.py")
     assert priced["estimated_cost_usd"] < flat["estimated_cost_usd"]
+    assert priced["estimated_cost_range_usd"][0] < priced["estimated_cost_usd"] < priced["estimated_cost_range_usd"][1]
     assert {x["basis"] for x in priced["cost_breakdown"] if x["role"] != "implementation"} == {"토큰×단가"}
     assert {x["basis"] for x in flat["cost_breakdown"]} == {"기본 고정값"}
 
 
-async def test_service_review_estimates_from_the_real_diff_and_logs_it(repo):
+async def test_service_review_estimates_from_the_real_diff_with_a_range_and_logs_it(repo):
     plane = make_plane(repo, {"providers": {"openai": OA, "gemini": GE}})
     tid = plane.analyze_task(HIGH_TASK + " calc.py")["task_id"]
     (repo / "calc.py").write_text("def add(a, b):\n    return a + b\n" + "# padding line\n" * 200, encoding="utf-8")
     res = await plane.request_review(tid)
     est = res["estimated_review_cost_usd"]
-    assert est is not None and 0 < est < 0.5
+    lo, hi = res["estimated_review_cost_range_usd"]
+    assert est is not None and 0 < lo < est < hi < 0.5
     logged = [json.loads(l) for l in plane.audit.path.read_text(encoding="utf-8").splitlines()]
     ev = [e for e in logged if e["event"] == "mcp:review_estimate"]
     assert ev and ev[-1]["data"]["estimated_usd"] == pytest.approx(est) and ev[-1]["data"]["input_tokens"] > 1000  # the padded diff is counted
+    assert ev[-1]["data"]["estimated_low_usd"] == pytest.approx(lo) and ev[-1]["data"]["estimated_high_usd"] == pytest.approx(hi)
 
 
 async def test_service_review_has_no_estimate_when_a_reviewer_has_no_price(repo):
     plane = make_plane(repo, {"providers": {"openai": OA}})  # gemini unpriced
     tid = plane.analyze_task(HIGH_TASK + " calc.py")["task_id"]
     (repo / "calc.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
-    assert (await plane.request_review(tid))["estimated_review_cost_usd"] is None  # unknown, not zero
+    res = await plane.request_review(tid)
+    assert res["estimated_review_cost_usd"] is None and res["estimated_review_cost_range_usd"] is None  # unknown, not zero
 
 
-def test_cli_analyze_shows_the_basis_of_the_estimate(tmp_path):
+def test_cli_analyze_shows_the_basis_and_the_range_of_the_estimate(tmp_path):
     runner = CliRunner()
     runner.invoke(app, ["init", "-p", str(tmp_path)])
     flat = runner.invoke(app, ["analyze", HIGH_TASK, "-p", str(tmp_path)])
@@ -214,6 +288,6 @@ def test_cli_analyze_shows_the_basis_of_the_estimate(tmp_path):
     cfg["providers"]["gemini"].update(GE)
     cfgp.write_text(yaml.safe_dump(cfg), encoding="utf-8")
     priced = runner.invoke(app, ["analyze", HIGH_TASK, "-p", str(tmp_path)])
-    assert priced.exit_code == 0 and "토큰×단가" in priced.output and "가정" in priced.output
+    assert priced.exit_code == 0 and "토큰×단가" in priced.output and "가정" in priced.output and "범위" in priced.output
     js = json.loads(runner.invoke(app, ["analyze", HIGH_TASK, "-p", str(tmp_path), "--json"]).output)
     assert any(x["basis"] == "토큰×단가" for x in js["plan"]["cost_breakdown"])

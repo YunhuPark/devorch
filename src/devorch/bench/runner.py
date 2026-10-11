@@ -64,7 +64,8 @@ async def run_case(case: Case, mode: str, repeat: int, policy: Policy, providers
     t0 = time.monotonic()
     try:
         findings, completed_roles = await run_reviews(
-            run, steps, providers, AuditLogger(None), label=f"[{case.id}] ", max_cost_usd=policy.limits.max_cost_usd
+            run, steps, providers, AuditLogger(None), label=f"[{case.id}] ", max_cost_usd=policy.limits.max_cost_usd,
+            max_tokens=policy.limits.review_max_tokens,
         )
     except Exception as e:  # e.g. unregistered provider — recorded, never a pass
         findings, completed_roles = [], []

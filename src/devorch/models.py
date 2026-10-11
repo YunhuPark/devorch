@@ -108,10 +108,12 @@ class RoutingStep(BaseModel):
 class CostLine(BaseModel):
     role: str
     provider: str
-    usd: float
+    usd: float  # the middle estimate
     basis: str  # "토큰×단가" | "토큰×단가(미측정 가정)" | "기본 고정값"
     input_tokens: int = 0
     output_tokens: int = 0
+    usd_low: float = 0.0  # output-token range; equal to usd for a flat default (no range known)
+    usd_high: float = 0.0
 
 
 class RoutingPlan(BaseModel):
@@ -122,6 +124,8 @@ class RoutingPlan(BaseModel):
     run_tests: bool = True
     verification_level: str = "BASIC"
     estimated_cost_usd: float = 0.0
+    estimated_cost_low_usd: float = 0.0
+    estimated_cost_high_usd: float = 0.0
     estimated_latency_s: float = 0.0
     cost_breakdown: list[CostLine] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)

@@ -1,13 +1,19 @@
-"""Token-based cost estimate for reviewer calls: prompt size x configured price + a typical answer length.
+"""Token-based cost estimate for reviewer calls: prompt size x configured price + an output-token RANGE.
 
-Where the numbers come from (be honest about what they are):
-- ``CHARS_PER_TOKEN`` and ``OUTPUT_TOKENS`` for openai and gemini were FITTED on a benchmark run (2026-10-08, 11 cases) and
-  checked on a different one (2026-10-09, 16 cases, other reviewer mixes): the predicted total cost per mode was within
-  +2..+11%. That is an aggregate over many calls on SMALL diffs (~300 input tokens). A single call can be far off
-  (measured output per call ranged 36..518 tokens for openai and 241..1533 for gemini, thinking tokens included), and large
-  diffs have not been measured at all.
-- Anything for another provider (claude) is a flagged ASSUMPTION, not a measurement.
-- At analysis time the diff does not exist yet, so its size is an assumption (``assumed_diff_chars``).
+What the numbers are (be honest about it):
+
+INPUT tokens: ASCII characters / ``ASCII_CHARS_PER_TOKEN`` + non-ASCII characters x ``NONASCII_TOKENS_PER_CHAR`` (Hangul is
+about one token per character for both OpenAI and Gemini tokenizers). Checked on 16 benchmark prompts the coefficients were NOT
+fitted on (per-case -5..+10%, total +2..+3%) and on 4 real 6-36KB diffs including a Hangul-heavy one (within +-5%; the
+v1 single-rate formula was off by -35% on that one).
+
+OUTPUT tokens (what the model writes, thinking included) are the uncertain part: they grow with the prompt and vary a lot
+(OpenAI 27..1566, Gemini 249..4096+ on real diffs). So the estimate is a range (low / mid / high), each an affine function of the
+input size. These affine models were set by looking at 9 observations (the benchmark mean and 7 real reviews) — they document
+coverage, they are NOT a held-out validation; add new measurements to tests/test_cost_model.py and widen on a miss.
+
+Not covered: the implementation step (never measured), claude (flagged assumption), diffs larger than ~12k tokens, other models.
+At analysis time the diff does not exist yet, so its size is an assumption (``assumed_prompt_counts``).
 """
 
 from __future__ import annotations
@@ -16,39 +22,77 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-CHARS_PER_TOKEN: dict[str, float] = {"openai": 3.36, "gemini": 3.01}
-OUTPUT_TOKENS: dict[str, int] = {"openai": 317, "gemini": 979}  # per review call, mean; gemini includes thinking tokens
-ASSUMED_CHARS_PER_TOKEN = 3.0
-ASSUMED_OUTPUT_TOKENS = 500
+ASCII_CHARS_PER_TOKEN: dict[str, float] = {"openai": 3.5, "gemini": 3.0}
+NONASCII_TOKENS_PER_CHAR = 0.95
+ASSUMED_ASCII_CHARS_PER_TOKEN = 3.0  # providers never measured (claude)
+
+# output tokens = base + slope * input_tokens, for (low, mid, high); low is a flat floor (an answer of "[]" plus a little thinking)
+OUTPUT_MODEL: dict[str, dict[str, tuple[float, float]]] = {
+    "openai": {"low": (25, 0.0), "mid": (300, 0.10), "high": (600, 0.20)},
+    "gemini": {"low": (200, 0.0), "mid": (900, 0.25), "high": (1500, 0.50)},
+}
+ASSUMED_OUTPUT_MODEL = {"low": (25, 0.0), "mid": (500, 0.10), "high": (1500, 0.30)}  # unmeasured providers
 CONTEXT_OVERHEAD_CHARS = 300  # task/risk/file-list header and section labels around the diff in a review prompt
-DEFAULT_DIFF_CHARS_PER_FILE = 1500.0  # assumption: used only before a real diff exists
+DEFAULT_DIFF_CHARS_PER_FILE = 1500.0  # assumption, used only before a real diff exists
 
 Prices = Mapping[str, Mapping[str, float]]
 
 
 @dataclass(frozen=True)
 class CallEstimate:
-    usd: float | None  # None = no (complete) price configured: unknown, never 0
+    usd: float | None  # the middle estimate; None = no (complete) price configured: unknown, never 0
+    usd_low: float | None
+    usd_high: float | None
     input_tokens: int
-    output_tokens: int
-    measured: bool  # coefficients were fitted on benchmark data (False = flagged assumption)
+    output_tokens: int  # middle
+    output_low: int
+    output_high: int
+    measured: bool  # the coefficients were checked against benchmark/real data (False = flagged assumption)
 
 
-def estimate_call(provider: str, prompt_chars: int, prices: Prices | None) -> CallEstimate:
-    measured = provider in CHARS_PER_TOKEN
-    in_tok = round(prompt_chars / CHARS_PER_TOKEN.get(provider, ASSUMED_CHARS_PER_TOKEN))
-    out_tok = OUTPUT_TOKENS.get(provider, ASSUMED_OUTPUT_TOKENS)
+def count_chars(text: str) -> tuple[int, int]:
+    """(ASCII characters, everything else)."""
+    ascii_chars = sum(1 for c in text if ord(c) < 128)
+    return ascii_chars, len(text) - ascii_chars
+
+
+def estimate_counts(
+    provider: str, ascii_chars: int, nonascii_chars: int, prices: Prices | None, max_output_tokens: int | None = None
+) -> CallEstimate:
+    """Estimate one call from the character counts of its prompt. ``max_output_tokens`` (the configured output budget) caps the range."""
+    measured = provider in ASCII_CHARS_PER_TOKEN
+    in_tok = round(ascii_chars / ASCII_CHARS_PER_TOKEN.get(provider, ASSUMED_ASCII_CHARS_PER_TOKEN) + nonascii_chars * NONASCII_TOKENS_PER_CHAR)
+    model = OUTPUT_MODEL.get(provider, ASSUMED_OUTPUT_MODEL)
+
+    def out(which: str) -> int:
+        base, slope = model[which]
+        tokens = round(base + slope * in_tok)
+        return min(tokens, max_output_tokens) if max_output_tokens else tokens
+
+    lo, mid, hi = out("low"), out("mid"), out("high")
     p = (prices or {}).get(provider) or {}
     if "input_per_mtok" not in p or "output_per_mtok" not in p:
-        return CallEstimate(None, in_tok, out_tok, measured)
-    return CallEstimate((in_tok * p["input_per_mtok"] + out_tok * p["output_per_mtok"]) / 1_000_000, in_tok, out_tok, measured)
+        return CallEstimate(None, None, None, in_tok, mid, lo, hi, measured)
+
+    def usd(out_tokens: int) -> float:
+        return (in_tok * p["input_per_mtok"] + out_tokens * p["output_per_mtok"]) / 1_000_000
+
+    return CallEstimate(usd(mid), usd(lo), usd(hi), in_tok, mid, lo, hi, measured)
 
 
-def assumed_prompt_chars(task_text: str, n_direct_files: int, chars_per_file: float = DEFAULT_DIFF_CHARS_PER_FILE) -> int:
-    """Review prompt size BEFORE the diff exists: system prompt + header + an assumed diff size."""
+def estimate_call(provider: str, prompt: str, prices: Prices | None, max_output_tokens: int | None = None) -> CallEstimate:
+    """Estimate one call from its prompt text (system prompt + user prompt)."""
+    a, n = count_chars(prompt)
+    return estimate_counts(provider, a, n, prices, max_output_tokens)
+
+
+def assumed_prompt_counts(task_text: str, n_direct_files: int, chars_per_file: float = DEFAULT_DIFF_CHARS_PER_FILE) -> tuple[int, int]:
+    """Review prompt size BEFORE the diff exists: system prompt + header + task text + an assumed (ASCII) diff size."""
     from devorch.core.orchestrator.review import REVIEWER_SYSTEM  # local: avoids an import cycle with the engine
 
-    return round(len(REVIEWER_SYSTEM) + len(task_text) + CONTEXT_OVERHEAD_CHARS + max(1, n_direct_files) * chars_per_file)
+    t_ascii, t_non = count_chars(task_text)
+    diff_chars = max(1, n_direct_files) * chars_per_file
+    return round(len(REVIEWER_SYSTEM) + CONTEXT_OVERHEAD_CHARS + t_ascii + diff_chars), t_non
 
 
 def _complete(p: Mapping[str, Any] | None) -> dict[str, float] | None:

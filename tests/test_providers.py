@@ -175,3 +175,35 @@ def test_cli_real_run_asks_before_spending(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
     r = CliRunner().invoke(app, ["run", "버튼 텍스트 변경", "-p", str(tmp_path)], input="n\n")
     assert r.exit_code == 1 and "진행할까요?" in r.output and "실제 LLM API를 호출" in r.output
+
+
+# ---- a failed call can still cost money: the error carries what the API reported -------------------------------
+async def test_gemini_truncated_by_thinking_tokens_reports_the_spend_on_the_error():
+    # the 5f24ce0 review: the answer was cut at max_tokens, but the model had already generated 4096 tokens (thinking included)
+    usage = NS(prompt_token_count=9000, candidates_token_count=100, thoughts_token_count=3996)
+    result = NS(text="par", candidates=[NS(finish_reason="FinishReason.MAX_TOKENS")], usage_metadata=usage)
+    with pytest.raises(ProviderError, match="잘림") as ei:
+        await GeminiProvider("m", client=gem(result), prices=PRICES).generate(REQ)
+    e = ei.value
+    assert (e.input_tokens, e.output_tokens, e.truncated) == (9000, 4096, True)
+    assert e.cost_usd == pytest.approx(9000 * 3.0 / 1e6 + 4096 * 15.0 / 1e6)
+
+
+async def test_anthropic_and_openai_truncation_and_empty_answers_report_their_usage_too():
+    trunc = Recorder(NS(content=[NS(type="text", text="{")], stop_reason="max_tokens", usage=NS(input_tokens=700, output_tokens=500)))
+    with pytest.raises(ProviderError) as a:
+        await AnthropicProvider("m", client=NS(messages=trunc), prices=PRICES).generate(REQ)
+    assert (a.value.input_tokens, a.value.output_tokens, a.value.truncated) == (700, 500, True)
+    inc = Recorder(NS(status="incomplete", incomplete_details=NS(reason="max_output_tokens"), output_text="par", usage=NS(input_tokens=800, output_tokens=500)))
+    with pytest.raises(ProviderError) as o:
+        await OpenAIProvider("m", client=NS(responses=inc), prices=PRICES).generate(REQ)
+    assert (o.value.input_tokens, o.value.output_tokens, o.value.truncated) == (800, 500, True)
+    empty = Recorder(NS(content=[NS(type="tool_use")], stop_reason="end_turn", usage=NS(input_tokens=11, output_tokens=0)))
+    with pytest.raises(ProviderError) as m:
+        await AnthropicProvider("m", client=NS(messages=empty)).generate(REQ)  # no prices configured
+    assert m.value.input_tokens == 11 and m.value.cost_usd is None and not m.value.truncated  # unknown, never 0
+
+
+def test_provider_error_defaults_mean_nothing_was_reported():
+    e = ProviderError("boom")
+    assert (e.input_tokens, e.output_tokens, e.cost_usd, e.truncated) == (0, 0, None, False)

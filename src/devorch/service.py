@@ -100,9 +100,15 @@ class ControlPlane:
         """Cost of the reviews about to run, from the REAL prompts (so the actual diff size is counted). usd is None if any
         reviewer has no price — unknown, never 0. Logged so estimates can later be compared with the actual cost."""
         prices = self._prices()
-        ests = [estimate_call(s.provider, len(REVIEWER_SYSTEM) + len(build_review_prompt(record.run, s)), prices) for s in steps]
-        usd = None if any(e.usd is None for e in ests) else round(sum(e.usd for e in ests), 6)
-        info = {"estimated_usd": usd, "input_tokens": sum(e.input_tokens for e in ests), "output_tokens": sum(e.output_tokens for e in ests), "calls": len(ests)}
+        budget = self.policy.limits.review_max_tokens
+        ests = [estimate_call(s.provider, REVIEWER_SYSTEM + build_review_prompt(record.run, s), prices, max_output_tokens=budget) for s in steps]
+        known = not any(e.usd is None for e in ests)
+        info = {
+            "estimated_usd": round(sum(e.usd for e in ests), 6) if known else None,
+            "estimated_low_usd": round(sum(e.usd_low for e in ests), 6) if known else None,
+            "estimated_high_usd": round(sum(e.usd_high for e in ests), 6) if known else None,
+            "input_tokens": sum(e.input_tokens for e in ests), "output_tokens": sum(e.output_tokens for e in ests), "calls": len(ests),
+        }
         if log:
             self._log(record, "review_estimate", **info)
         return info
@@ -241,6 +247,7 @@ class ControlPlane:
             "approval_reasons": plan.approval_reasons,
             "verification_level": plan.verification_level,
             "estimated_cost_usd": plan.estimated_cost_usd,
+            "estimated_cost_range_usd": [plan.estimated_cost_low_usd, plan.estimated_cost_high_usd],
             "cost_breakdown": [line.model_dump() for line in plan.cost_breakdown],
             "cost_notes": [n for n in plan.notes if n.startswith("비용")],
             "next_step": "작업 트리에서 코드를 구현한 뒤 devorch_request_review 를 호출하세요.",
@@ -329,15 +336,15 @@ class ControlPlane:
         estimate = self._estimate_review(record, steps)
         if cap is not None and estimate["estimated_usd"] is not None and run.total_cost_usd + estimate["estimated_usd"] > cap:
             raise ControlPlaneError(
-                f"예상 리뷰 비용 ${estimate['estimated_usd']:.4f} 가 남은 비용 상한 ${max(0.0, cap - run.total_cost_usd):.4f} "
-                f"(limits.max_cost_usd=${cap})을 넘을 것으로 보여 호출하지 않았습니다. 상한을 올리거나 변경을 나누세요."
+                f"예상 리뷰 비용 ${estimate['estimated_usd']:.4f} (범위 ${estimate['estimated_low_usd']:.4f}~${estimate['estimated_high_usd']:.4f}) 가 "
+                f"남은 비용 상한 ${max(0.0, cap - run.total_cost_usd):.4f} (limits.max_cost_usd=${cap})을 넘을 것으로 보여 호출하지 않았습니다. 상한을 올리거나 변경을 나누세요."
             )
         record.review_rounds += 1
         required = [s.role for s in steps]
         findings: list[Finding] = []
         completed: list[str] = []
         if steps:
-            findings, completed = await run_reviews(run, steps, self.providers, self.audit, label=f"review {record.review_rounds}: ", max_cost_usd=cap)
+            findings, completed = await run_reviews(run, steps, self.providers, self.audit, label=f"review {record.review_rounds}: ", max_cost_usd=cap, max_tokens=self.policy.limits.review_max_tokens)
         run.findings = findings
         run.evaluation = evaluate(findings, required, completed)
         record.reviewed_sha = sha
@@ -370,6 +377,7 @@ class ControlPlane:
             "cost_usd": None if run.cost_unknown else round(run.total_cost_usd, 4),
             # estimated BEFORE the calls from the real prompt size and the configured prices (None = a reviewer has no price)
             "estimated_review_cost_usd": estimate["estimated_usd"] if estimate else None,
+            "estimated_review_cost_range_usd": [estimate["estimated_low_usd"], estimate["estimated_high_usd"]] if estimate and estimate["estimated_usd"] is not None else None,
             "usage": run.usage,  # tokens per provider, cumulative over this task's LLM calls
             "reviewers": [f"{s.role}:{s.provider}" for s in (run.plan.review_steps if run.plan else [])],
             "notes": run.notes[-5:],

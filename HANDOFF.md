@@ -13,7 +13,7 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 설치: `python -m venv .venv` → `.venv\Scripts\Activate.ps1` → `pip install -e ".[dev,llm]"` → `pytest`. 막히면 `devorch doctor`.
 
 ## 현재 상태 (2026-10-09, 사실만)
-- **테스트: Windows 네이티브에서 367 passed, 1 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
+- **테스트: Windows 네이티브에서 389 passed, 1 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
   이 PC의 `git.exe` 실행이 간헐적으로 거부됨(WinError 5, 원인 미확정, `git/manager.py` 에 Windows 한정 재시도 완화책).
 - 구현됨: Task Analyzer / Risk Engine / Impact Analyzer / Model Router + policy.yaml / Evaluator(fail-closed) / 상태 머신 / Provider 어댑터
   (Anthropic, OpenAI, Gemini) / 실행기(git worktree) / MCP 서버 / Docker 샌드박스 / Benchmark(+LLM 판정기, solo 모드, 결함 단위 통계) / Dashboard /
@@ -24,7 +24,11 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 - **검증하지 못한 것(검증했다고 쓰지 말 것):**
   - **실제 MCP 클라이언트(Claude Code 등) 연결** — 연습 프로젝트(`..\devorch-playground`, `.mcp.json` 포함)를 만들어 뒀지만 사람이 앱에서 확인해야 함.
   - 실제 Docker 컨테이너 실행(Windows의 `1000:1000` 사용자와 `C:\` 마운트 포함).
-  - **큰 diff의 비용 예측** — 계수는 약 300 토큰짜리 diff에서만 맞췄다. 구현 단계 비용은 실측이 없고(고정값 $0.05), claude 토큰 계수도 미측정.
+  - **큰 diff의 비용 예측(부분 검증)** — 2026-10-11 이 저장소의 실제 커밋 4건(6.6~36KB, HIGH)을 `devorch review` 로 측정: 입력 토큰 예측은 식을 고친 뒤 ±5%, 출력 토큰은 diff가 커질수록 늘고 편차가 커서
+    점 추정(처음 −42%~+48% 오차)을 버리고 **범위**로 바꿨다. 그러나 그 범위는 *본 데이터에 맞춰 정한 것(in-sample)*이라 아직 검증이 아님 — **새 커밋으로 hold-out 검증 필요**(다음 할 일 1번).
+    약 1만 2천 토큰보다 큰 diff, 구현 단계 비용(고정값 $0.05), claude 토큰 계수는 여전히 미측정.
+  - 이 측정이 드러낸 버그를 고쳤다: **실패한(잘린) 호출의 비용이 집계·상한에서 빠졌다**(Gemini 가 생각 토큰으로 max_tokens 4096 을 소진, 청구됐지만 DevOrch 는 몰랐음). 이제 `ProviderError` 가 지출을 싣고,
+    `call_provider` 가 기록한다. 리뷰어 출력 한도는 `limits.review_max_tokens`(기본 8192).
   - OpenAI 추론 토큰이 `usage.output_tokens`에 포함되는지(입력·요청 수·지출은 일치, 출력 분리는 미확인). Gemini 단가는 2027년 인상 예정(요약 표 기준, 미확인).
   - LLM 판정기의 신뢰성(판정자 Claude는 내 판단과 같은 계열이라 독립 확인이 아님).
   - OpenAI/Gemini 단가·모델 ID는 공식 페이지를 *요약기*로 읽은 값(config.yaml, git 제외) — 사용 전에 원문과 대조할 것.
@@ -48,8 +52,8 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 11. **안전 장치는 일부러 깨 봐서 테스트가 잡는지 확인한다**(변형 확인). 비용·보안 거부는 LLM 호출 *전에* 일어나야 한다. 위험 수준은 올릴 수만 있고 낮출 수 없다.
 
 ## 지금 할 일 (우선순위)
-1. **큰 diff 비용 측정**: 사용자가 PowerShell에 키를 넣고 `python -m devorch review --git-range <범위> --task "..." --level high --yes` 를 크기가 다른 실제 커밋 3~4개에 실행 →
-   출력의 "예상 vs 실제 비용" 오차를 모아 `core/router/cost_model.py` 계수를 재보정(오차 ±15% 목표). 오차가 크면 큰 diff는 별도 계수/상한으로 처리.
+1. **비용 범위의 hold-out 검증**: 4건으로 정한 출력 범위를 *새로운* 커밋 6~8개(`devorch review --git-range <커밋>~1..<커밋> --task "코드 변경 리뷰" --level high`)에 적용해 실제 값이 범위 안에 드는 비율을 센다.
+   자격증명 형태 문자열(테스트용 가짜 키)이 든 커밋은 우리 검사가 거부하니 제외. 밖이면 범위를 넓히고(테스트 `LARGE` 에 관측값 추가) 좁히지 않는다. 더 큰 diff(1만 2천 토큰 초과)도 최소 1건.
 2. **Claude Code 실연결**: `..\devorch-playground` 를 VS Code로 열어 `.mcp.json` 서버를 승인하고 전체 흐름을 한 번 돌린다. 막히는 곳은 `devorch doctor` 출력에 반영.
 3. **구현 단계 비용 실측**: `devorch run`(구현 포함)을 소액으로 실행해 구현 호출의 입출력 토큰을 기록, `policy.estimates.cost_usd` 고정값 대체.
 4. **현실적 평가 세트**: 시드 결함 대신 실제 오픈소스 버그 수정 커밋(알려진 버그)으로 탐지율·비용 평가. 판정은 사람 확인이 섞인 정답 라벨 필요.

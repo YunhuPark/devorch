@@ -124,9 +124,14 @@ def analyze(
     lines += [f"      · {r}" for r in plan.approval_reasons]
     lines += [
         f"  - 검증 수준: {plan.verification_level}",
-        f"  - 예상 비용: ~${plan.estimated_cost_usd:.3f} / 예상 시간: ~{plan.estimated_latency_s:.0f}s (시간은 기본 추정치)",
+        f"  - 예상 비용: ~${plan.estimated_cost_usd:.3f}"
+        + (f" (범위 ${plan.estimated_cost_low_usd:.3f} ~ ${plan.estimated_cost_high_usd:.3f})" if plan.estimated_cost_high_usd > plan.estimated_cost_low_usd else "")
+        + f" / 예상 시간: ~{plan.estimated_latency_s:.0f}s (시간은 기본 추정치)",
     ]
-    lines += [f"      · {x.role:<14} {x.provider:<7} ${x.usd:.4f}  ({x.basis})" for x in plan.cost_breakdown]
+    lines += [
+        f"      · {x.role:<14} {x.provider:<7} ${x.usd:.4f}" + (f" (${x.usd_low:.4f}~${x.usd_high:.4f})" if x.usd_high > x.usd_low else "") + f"  [{x.basis}]"
+        for x in plan.cost_breakdown
+    ]
     lines += [f"  ※ {n}" for n in plan.notes]
     typer.echo("\n".join(lines))
 
@@ -413,9 +418,10 @@ def review(
             typer.echo("이 위험 수준에는 배정된 리뷰어가 없어 리뷰를 하지 않습니다. 리뷰를 받으려면 --level medium|high|critical 로 위험 수준을 높이세요.")
             raise typer.Exit(0)
         typer.echo("리뷰어: " + ", ".join(prev["reviewers"]))
+        rng = f", 범위 {_fmt_usd(prev['estimated_low_usd'])} ~ {_fmt_usd(prev['estimated_high_usd'])}" if prev["estimated_usd"] is not None else ""
         typer.echo(
-            f"예상 비용: {_fmt_usd(prev['estimated_usd'])} (입력 ~{prev['input_tokens']:,} / 출력 ~{prev['output_tokens']:,} 토큰, 단가×토큰 추정 — "
-            "작은 diff에서만 검증됨, 개별 호출은 편차가 큼)"
+            f"예상 비용: {_fmt_usd(prev['estimated_usd'])}{rng} (입력 ~{prev['input_tokens']:,} 토큰은 ±10% 안팎으로 검증됨, "
+            f"출력 ~{prev['output_tokens']:,} 토큰은 편차가 커서 범위로 봐야 함 — 약 1만 2천 토큰보다 큰 diff는 검증되지 않았음)"
         )
         if not (yes or mock) and not typer.confirm("실제 LLM API를 호출합니다. 진행할까요?"):
             raise typer.Exit(1)
@@ -443,7 +449,11 @@ def review(
         actual, est = res["cost_usd"], res["estimated_review_cost_usd"]
         line = f"실제 비용: {_fmt_usd(actual)}"
         if actual and est:
-            line += f" (예상 {_fmt_usd(est)} 대비 {(est - actual) / actual * 100:+.0f}%)"
+            lo, hi = res["estimated_review_cost_range_usd"]
+            line += f" (예상 {_fmt_usd(est)} 대비 {(est - actual) / actual * 100:+.0f}%, 범위 {'안' if lo <= actual <= hi else '밖'})"
+        failed = {p: u["failed_calls"] for p, u in res["usage"].items() if u.get("failed_calls")}
+        if failed:
+            line += "   ※ 실패한 호출도 청구됨: " + ", ".join(f"{p} {n}회" for p, n in failed.items())
         typer.echo(line + "   토큰: " + (", ".join(f"{p} {u['input_tokens']:,}/{u['output_tokens']:,}" for p, u in res["usage"].items()) or "-"))
     if res["status"] == "NOT_READY":
         raise typer.Exit(1)

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from devorch.audit import AuditLogger
 from devorch.core.evaluator.evaluator import parse_findings
 from devorch.models import Finding, RoutingStep
-from devorch.providers.base import LLMRequest, LLMResponse, ProviderRegistry
+from devorch.providers.base import LLMRequest, LLMResponse, ProviderError, ProviderRegistry
 from devorch.security.secret_redactor import redact
 
 if TYPE_CHECKING:
@@ -104,30 +104,44 @@ async def call_provider(
     """
     provider = providers.get(step.provider)
     _check_budget(run, audit, step, max_cost_usd)
-    resp = await provider.generate(request)
-    if resp.cost_usd is None:
+    try:
+        resp = await provider.generate(request)
+    except ProviderError as e:
+        # The API answered but the answer is unusable (cut at max_tokens, empty, blocked): the tokens were still billed.
+        _account(run, audit, step, "", e.input_tokens, e.output_tokens, e.cost_usd, max_cost_usd, error=str(e)[:200])
+        raise
+    _account(run, audit, step, resp.model, resp.input_tokens, resp.output_tokens, resp.cost_usd, max_cost_usd, latency_s=resp.latency_s)
+    return resp
+
+
+def _account(
+    run: "WorkflowRun", audit: AuditLogger, step: RoutingStep, model: str, in_tok: int, out_tok: int,
+    cost_usd: float | None, max_cost_usd: float | None, latency_s: float = 0.0, error: str | None = None,
+) -> None:
+    """Cost, tokens and the audit record of one call — successful or not."""
+    if cost_usd is None:
         run.cost_unknown = True
     else:
-        run.total_cost_usd += resp.cost_usd
-    if resp.model:
-        run.models[step.provider] = resp.model
+        run.total_cost_usd += cost_usd
+    if model:
+        run.models[step.provider] = model
     u = run.usage.setdefault(step.provider, {"calls": 0, "input_tokens": 0, "output_tokens": 0})
     u["calls"] += 1
-    u["input_tokens"] += resp.input_tokens
-    u["output_tokens"] += resp.output_tokens
-    audit.log(
-        run.id,
-        "llm_call",
-        {
-            "role": step.role, "provider": step.provider, "model": resp.model,
-            "input_tokens": resp.input_tokens, "output_tokens": resp.output_tokens,
-            "cost_usd": resp.cost_usd, "total_cost_usd": None if run.cost_unknown else round(run.total_cost_usd, 6),
-            "max_cost_usd": max_cost_usd, "latency_s": resp.latency_s,
-        },
-    )
+    u["input_tokens"] += in_tok
+    u["output_tokens"] += out_tok
+    if error is not None:
+        u["failed_calls"] = u.get("failed_calls", 0) + 1
+    record = {
+        "role": step.role, "provider": step.provider, "model": model,
+        "input_tokens": in_tok, "output_tokens": out_tok,
+        "cost_usd": cost_usd, "total_cost_usd": None if run.cost_unknown else round(run.total_cost_usd, 6),
+        "max_cost_usd": max_cost_usd, "latency_s": latency_s,
+    }
+    if error is not None:
+        record.update(failed=True, error=error)
+    audit.log(run.id, "llm_call", record)
     if max_cost_usd is not None and not run.cost_unknown and run.total_cost_usd > max_cost_usd:
         run.notes.append(f"비용 상한 초과: ${run.total_cost_usd:.4f} > ${max_cost_usd:.4f} (진행 중이던 호출이 끝난 뒤 확인됨)")
-    return resp
 
 
 async def run_reviews(
@@ -137,17 +151,20 @@ async def run_reviews(
     audit: AuditLogger,
     label: str = "",
     max_cost_usd: float | None = None,
+    max_tokens: int | None = None,
 ) -> tuple[list[Finding], list[str]]:
     """Run all reviewers concurrently and independently.
 
     Returns (findings, completed_roles). A reviewer whose call failed or whose
     answer could not be parsed is NOT in ``completed_roles`` — never a silent pass.
+    ``max_tokens`` is the per-call output budget (``limits.review_max_tokens``); thinking models spend part of it on thoughts.
     """
+    extra = {"max_tokens": max_tokens} if max_tokens else {}
     results = await asyncio.gather(
         *(
             call_provider(
                 run, providers, audit, s,
-                LLMRequest(role=s.role, system=REVIEWER_SYSTEM, prompt=build_review_prompt(run, s)),
+                LLMRequest(role=s.role, system=REVIEWER_SYSTEM, prompt=build_review_prompt(run, s), **extra),
                 max_cost_usd=max_cost_usd,
             )
             for s in steps
@@ -158,7 +175,12 @@ async def run_reviews(
     completed: list[str] = []
     for step, result in zip(steps, results):
         if isinstance(result, BaseException):
-            run.notes.append(f"{label}{step.role}({step.provider}) 호출 실패: {describe_error(result)}")
+            hint = (
+                " — 이 호출은 잘렸지만 토큰 비용은 이미 청구됐습니다. 큰 diff에서는 policy.yaml 의 limits.review_max_tokens 를 올리세요(생각 토큰이 출력 한도를 쓰는 모델이 있음)"
+                if isinstance(result, ProviderError) and result.truncated
+                else ""
+            )
+            run.notes.append(f"{label}{step.role}({step.provider}) 호출 실패: {describe_error(result)}{hint}")
             audit.log(run.id, "review_failed", {"role": step.role, "error": describe_error(result)})
             continue
         parsed, ok = parse_findings(step.provider, step.role, result.text)

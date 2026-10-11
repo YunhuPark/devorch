@@ -10,11 +10,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from devorch.providers.base import LLMProvider, LLMRequest, LLMResponse
-
-
-class ProviderError(RuntimeError):
-    """A provider call that did not produce a complete, usable answer."""
+from devorch.providers.base import LLMProvider, LLMRequest, LLMResponse, ProviderError  # noqa: F401 (re-exported)
 
 
 def _cost(prices: dict[str, float] | None, in_tok: int, out_tok: int) -> float | None:
@@ -60,12 +56,14 @@ class AnthropicProvider(_PricedProvider):
             kwargs["system"] = request.system
         t0 = time.monotonic()
         resp = await self._client.messages.create(**kwargs)
+        usage = getattr(resp, "usage", None)
+        in_tok, out_tok = getattr(usage, "input_tokens", 0) or 0, getattr(usage, "output_tokens", 0) or 0
+        spent = (in_tok, out_tok, _cost(self.prices, in_tok, out_tok))  # already billed even if the answer is unusable
         if getattr(resp, "stop_reason", None) == "max_tokens":
-            raise ProviderError(f"{self.name}: 응답이 max_tokens({request.max_tokens})에서 잘림")
+            raise ProviderError(f"{self.name}: 응답이 max_tokens({request.max_tokens})에서 잘림", *spent, truncated=True)
         text = "".join(getattr(b, "text", "") for b in resp.content if getattr(b, "type", None) == "text")
         if not text:
-            raise ProviderError(f"{self.name}: 빈 응답 (stop_reason={getattr(resp, 'stop_reason', None)})")
-        in_tok, out_tok = resp.usage.input_tokens, resp.usage.output_tokens
+            raise ProviderError(f"{self.name}: 빈 응답 (stop_reason={getattr(resp, 'stop_reason', None)})", *spent)
         return LLMResponse(
             text=text, provider=self.name, model=self.model, input_tokens=in_tok, output_tokens=out_tok,
             cost_usd=_cost(self.prices, in_tok, out_tok), latency_s=round(time.monotonic() - t0, 3),
@@ -101,15 +99,16 @@ class OpenAIProvider(_PricedProvider):
             kwargs["instructions"] = request.system
         t0 = time.monotonic()
         resp = await self._client.responses.create(**kwargs)
-        if getattr(resp, "status", "completed") == "incomplete":
-            reason = getattr(getattr(resp, "incomplete_details", None), "reason", "unknown")
-            raise ProviderError(f"{self.name}: 응답이 완료되지 않음 ({reason})")
-        text = getattr(resp, "output_text", "") or ""
-        if not text:
-            raise ProviderError(f"{self.name}: 빈 응답 (status={getattr(resp, 'status', None)})")
         usage = getattr(resp, "usage", None)
         in_tok = getattr(usage, "input_tokens", 0) or 0
         out_tok = getattr(usage, "output_tokens", 0) or 0
+        spent = (in_tok, out_tok, _cost(self.prices, in_tok, out_tok))
+        if getattr(resp, "status", "completed") == "incomplete":
+            reason = getattr(getattr(resp, "incomplete_details", None), "reason", "unknown")
+            raise ProviderError(f"{self.name}: 응답이 완료되지 않음 ({reason})", *spent, truncated="max_output_tokens" in str(reason))
+        text = getattr(resp, "output_text", "") or ""
+        if not text:
+            raise ProviderError(f"{self.name}: 빈 응답 (status={getattr(resp, 'status', None)})", *spent)
         return LLMResponse(
             text=text, provider=self.name, model=self.model, input_tokens=in_tok, output_tokens=out_tok,
             cost_usd=_cost(self.prices, in_tok, out_tok), latency_s=round(time.monotonic() - t0, 3),
@@ -151,15 +150,16 @@ class GeminiProvider(_PricedProvider):
 
         candidates = getattr(resp, "candidates", None) or []
         finish = str(getattr(candidates[0], "finish_reason", "")) if candidates else ""
-        if "MAX_TOKENS" in finish:
-            raise ProviderError(f"{self.name}: 응답이 max_tokens({request.max_tokens})에서 잘림")
-        text = getattr(resp, "text", None)
-        if not text:
-            raise ProviderError(f"{self.name}: 빈 응답 또는 차단됨 (finish_reason={finish or 'n/a'})")
         usage = getattr(resp, "usage_metadata", None)
         in_tok = getattr(usage, "prompt_token_count", 0) or 0
         # Thinking tokens are reported separately from the answer but billed at the output rate.
         out_tok = (getattr(usage, "candidates_token_count", 0) or 0) + (getattr(usage, "thoughts_token_count", 0) or 0)
+        spent = (in_tok, out_tok, _cost(self.prices, in_tok, out_tok))
+        if "MAX_TOKENS" in finish:
+            raise ProviderError(f"{self.name}: 응답이 max_tokens({request.max_tokens})에서 잘림", *spent, truncated=True)
+        text = getattr(resp, "text", None)
+        if not text:
+            raise ProviderError(f"{self.name}: 빈 응답 또는 차단됨 (finish_reason={finish or 'n/a'})", *spent)
         return LLMResponse(
             text=text, provider=self.name, model=self.model, input_tokens=in_tok, output_tokens=out_tok,
             cost_usd=_cost(self.prices, in_tok, out_tok), latency_s=round(time.monotonic() - t0, 3),

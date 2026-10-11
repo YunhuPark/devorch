@@ -26,6 +26,19 @@ class LLMResponse(BaseModel):
     latency_s: float = 0.0
 
 
+class ProviderError(RuntimeError):
+    """A provider call that did not produce a complete, usable answer.
+
+    When the API DID answer (e.g. the reply was cut at max_tokens, or came back empty), the tokens it reports were still
+    generated and billed: ``input_tokens`` / ``output_tokens`` / ``cost_usd`` carry that spend (``cost_usd`` None = no price
+    configured, unknown — never 0) so the cost accounting and the spend cap can see it. ``truncated`` marks a max_tokens cut.
+    """
+
+    def __init__(self, message: str, input_tokens: int = 0, output_tokens: int = 0, cost_usd: float | None = None, truncated: bool = False) -> None:
+        super().__init__(message)
+        self.input_tokens, self.output_tokens, self.cost_usd, self.truncated = input_tokens, output_tokens, cost_usd, truncated
+
+
 class LLMProvider(ABC):
     name: str
 

@@ -44,6 +44,16 @@ class LimitsPolicy(BaseModel):
     # Per-task spend cap in USD (null = no cap). Needs prices for every provider in use
     # (providers.<name>.input_per_mtok / output_per_mtok) — without them the cap can't be enforced, so runs refuse to start.
     max_cost_usd: float | None = None
+    # Output budget per reviewer call. Thinking models (Gemini) spend part of it on thoughts: 4096 was too small for a ~9k-token diff
+    # (the review was cut off and still billed). A higher budget costs nothing unless the model actually uses it.
+    review_max_tokens: int = 8192
+
+    @field_validator("review_max_tokens")
+    @classmethod
+    def _review_budget(cls, v: int) -> int:
+        if not 1024 <= v <= 65536:
+            raise ValueError("limits.review_max_tokens must be between 1024 and 65536")
+        return v
 
     @field_validator("max_cost_usd")
     @classmethod

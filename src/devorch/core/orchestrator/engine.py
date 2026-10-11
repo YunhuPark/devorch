@@ -163,7 +163,7 @@ class WorkflowEngine:
             completed: list[str] = []
             if review_steps:
                 self._move(run, State.REVIEWING)
-                findings, completed = await run_reviews(run, review_steps, self.providers, self.audit, label=f"round {run.rounds}: ", max_cost_usd=cap)
+                findings, completed = await run_reviews(run, review_steps, self.providers, self.audit, label=f"round {run.rounds}: ", max_cost_usd=cap, max_tokens=self.policy.limits.review_max_tokens)
 
             run.findings = findings
             self._move(run, State.EVALUATING)
