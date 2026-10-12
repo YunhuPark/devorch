@@ -317,3 +317,18 @@ async def test_timeout_leaves_no_process_behind_when_children_are_still_being_sp
     await asyncio.sleep(5)  # long enough for any orphan to have written its file
     survivors = sorted(p.name for p in tmp_path.glob("child_*.txt"))
     assert not survivors, f"{len(survivors)} child processes survived the timeout: {survivors[:3]}"
+
+
+def test_cli_saves_the_proposed_diff_byte_exact_without_converting_line_endings(repo, monkeypatch):
+    """Text-mode writing turned every LF into CRLF on Windows: the saved .diff then failed `git apply` against LF files."""
+    import devorch.cli.main as cli_main
+
+    monkeypatch.setattr(
+        cli_main, "MockProvider",
+        lambda name, fn: MockProvider(name, lambda req: "[]" if req.role != "implementation" else f"```diff\n{GOOD_DIFF}```\nfixed"),
+    )
+    r = CliRunner().invoke(app, ["run", "calc.py add 버그 수정", "-p", str(repo), "--mock"])
+    assert r.exit_code == 0, r.output
+    saved = next((repo / ".devorch" / "runs").glob("*.diff")).read_bytes()
+    assert b"\r" not in saved and saved.startswith(b"diff --git")
+    git(repo, "apply", "--check", str(next((repo / ".devorch" / "runs").glob("*.diff"))))  # applies as saved

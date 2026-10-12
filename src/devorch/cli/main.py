@@ -318,7 +318,7 @@ def run(
         if diff:
             out = devorch_dir(path) / "runs" / f"{result.id}.diff"
             out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(diff, encoding="utf-8")
+            out.write_bytes(diff.encode("utf-8"))  # byte-exact: text mode would turn every LF into CRLF on Windows and `git apply` then fails on LF files
             result.notes.append(f"제안된 diff 저장: {out} (적용하려면 --apply)")
     _print_run(result)
     if result.state.value != "COMPLETED":

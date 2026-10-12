@@ -13,7 +13,7 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 설치: `python -m venv .venv` → `.venv\Scripts\Activate.ps1` → `pip install -e ".[dev,llm]"` → `pytest`. 막히면 `devorch doctor`.
 
 ## 현재 상태 (2026-10-09, 사실만)
-- **테스트: Windows 네이티브에서 448 passed, 1 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
+- **테스트: Windows 네이티브에서 451 passed, 1 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
   이 PC의 `git.exe` 실행이 간헐적으로 거부됨(WinError 5, 원인 미확정, `git/manager.py` 에 Windows 한정 재시도 완화책).
 - **타임아웃 프로세스 트리 종료(2026-10-12 수정):** `taskkill /T` 는 프로세스 트리의 스냅샷을 따라 걷기 때문에, 종료 도중 새로 만들어진 자식이 살아남았다
   (계속 fork 하는 테스트로 재현: 타임아웃 뒤 자식 6개 생존, 3/3 실패). `core/execution/winjob.py`(Windows Job Object, ctypes, KILL_ON_JOB_CLOSE)로 바꾸고
@@ -39,6 +39,8 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
     **두 번째 관측(hold-out, 예상을 호출 전에 적어 둠):** "divide 함수 + ValueError + 테스트 추가" → 입력 273 / 출력 1,155 토큰, 실제 $0.0121 대 예상 $0.0045(범위 $0.0015~$0.0405).
     범위 안이지만 중간값의 **2.7배** — 중간값은 예측으로 쓸 수 없고 범위만 쓸 수 있다. 범위는 건드리지 않음(첫 관측 뒤에 정한 범위라 두 번째가 처음으로 hold-out 이었고 통과). **n=2, 범위는 여전히 가정** — 큰 변경의 출력(diff 길이)은 미검증.
     (같은 실행에서 요약 문구가 "구현 단계는 고정값"이라고 잘못 말하던 것을 발견해 수정: 이제 비용 줄의 근거에 따라 달라짐.)
+    **저장된 제안 diff 검증(2026-10-12):** `.devorch/runs/81d904d3.diff` 를 복사본에 `git apply` 해 보니 적용되고 새 테스트 5개 통과(실패 1개는 플레이그라운드에 일부러 심은 `add` 버그).
+    그 과정에서 **실제 버그 발견·수정:** 저장 시 텍스트 모드로 써서 Windows 에서 모든 줄이 CRLF 가 됨(저장본 42줄 모두 CR) → LF 파일에는 `git apply` 가 안 맞을 수 있었음. 바이트 그대로 쓰도록 수정, 테스트 추가(수정 전 실패 확인).
     분석기가 이 작업을 TEST 유형으로 분류함("테스트 추가" 때문, 실제로는 기능 추가) — 키워드 휴리스틱의 한계, 미수정.
     MCP `analyze_task` 는 아직 구현 단계를 고정값으로 계산함(CLI 와 다름).
   - **hold-out 결과(2026-10-11, 7개 새 리뷰):** 입력 14/14 호출이 −2~+6%, 출력 범위 12/14, 리뷰 비용 범위 6/7(밖 1건은 $0.0702 대 상한 $0.0668). 상한을 넓히고 Gemini 중간값을 보정 →
