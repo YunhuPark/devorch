@@ -23,7 +23,7 @@ from devorch.core.analyzer.task_analyzer import analyze_task
 from devorch.core.evaluator.evaluator import evaluate
 from devorch.core.orchestrator.review import budget_preflight, build_context, call_provider, run_reviews
 from devorch.core.orchestrator.state import State, check_transition
-from devorch.core.router.cost_model import prices_from_registry
+from devorch.core.router.cost_model import count_chars, prices_from_registry
 from devorch.core.router.model_router import plan_routing
 from devorch.models import (
     Evaluation,
@@ -75,6 +75,14 @@ class WorkflowRun(BaseModel):
     commit: str | None = None
     test_summary: str = ""
     test_output: str = ""
+
+
+def implementation_prompt_counts(run: "WorkflowRun", context_provider: "ContextProvider | None") -> tuple[int, int]:
+    """(ASCII chars, other chars) of the first implementation call's prompt — system prompt, task context and the real file
+    contents (as of HEAD) the context provider would hand over. Used for the cost estimate before anything is sent."""
+    files = context_provider(run) if context_provider else ""
+    text = IMPLEMENTER_SYSTEM + build_context(run) + (f"\nCurrent file contents (HEAD):\n{files}\n" if files else "")
+    return count_chars(text)
 
 
 class WorkflowEngine:
@@ -138,7 +146,10 @@ class WorkflowEngine:
         run.analysis = analyze_task(run.task_text)
         run.impact = analyze_impact(self.root, run.analysis)
         run.risk = assess_risk(run.analysis, run.impact)
-        run.plan = plan_routing(run.analysis, run.risk, run.impact, self.policy, prices=prices_from_registry(self.providers))
+        run.plan = plan_routing(
+            run.analysis, run.risk, run.impact, self.policy, prices=prices_from_registry(self.providers),
+            implementation_counts=implementation_prompt_counts(run, self.context_provider),
+        )
         self._move(run, State.PLANNED, risk=run.risk.level.value, steps=[(s.role, s.provider) for s in run.plan.steps])
 
         plan = run.plan
@@ -158,7 +169,14 @@ class WorkflowEngine:
         while True:
             run.rounds += 1
             self._move(run, State.DISPATCHING, round=run.rounds)
-            resp = await call_provider(run, self.providers, self.audit, impl_step, LLMRequest(role="implementation", system=IMPLEMENTER_SYSTEM, prompt=self._implementation_prompt(run, blocking)), max_cost_usd=cap)
+            resp = await call_provider(
+                run, self.providers, self.audit, impl_step,
+                LLMRequest(
+                    role="implementation", system=IMPLEMENTER_SYSTEM, prompt=self._implementation_prompt(run, blocking),
+                    max_tokens=self.policy.limits.implementation_max_tokens,
+                ),
+                max_cost_usd=cap,
+            )
             run.implementation = resp.text
 
             findings: list[Finding] = []

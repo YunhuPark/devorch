@@ -13,8 +13,12 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 설치: `python -m venv .venv` → `.venv\Scripts\Activate.ps1` → `pip install -e ".[dev,llm]"` → `pytest`. 막히면 `devorch doctor`.
 
 ## 현재 상태 (2026-10-09, 사실만)
-- **테스트: Windows 네이티브에서 439 passed, 1 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
+- **테스트: Windows 네이티브에서 448 passed, 1 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
   이 PC의 `git.exe` 실행이 간헐적으로 거부됨(WinError 5, 원인 미확정, `git/manager.py` 에 Windows 한정 재시도 완화책).
+- **타임아웃 프로세스 트리 종료(2026-10-12 수정):** `taskkill /T` 는 프로세스 트리의 스냅샷을 따라 걷기 때문에, 종료 도중 새로 만들어진 자식이 살아남았다
+  (계속 fork 하는 테스트로 재현: 타임아웃 뒤 자식 6개 생존, 3/3 실패). `core/execution/winjob.py`(Windows Job Object, ctypes, KILL_ON_JOB_CLOSE)로 바꾸고
+  taskkill 은 대체 수단으로 남김. 수정 뒤 같은 시험 3/3 통과. 간헐 실패하던 `test_timeout_kills_child_processes_too` 도 이 경합이 원인으로 **추정**(전체 실행 1회 실패 관측, 단독 4/4 통과였음).
+  한계: 프로세스 생성 직후~job 편입 직전의 아주 짧은 구간에 자식이 생기면 job 밖일 수 있음(미검증). 테스트가 남긴 백그라운드 프로세스는 이제 테스트 종료 때 같이 종료됨(job 닫힘).
 - 구현됨: Task Analyzer / Risk Engine / Impact Analyzer / Model Router + policy.yaml / Evaluator(fail-closed) / 상태 머신 / Provider 어댑터
   (Anthropic, OpenAI, Gemini) / 실행기(git worktree) / MCP 서버 / Docker 샌드박스 / Benchmark(+LLM 판정기, solo 모드, 결함 단위 통계) / Dashboard /
   **작업당 비용 상한(`limits.max_cost_usd`)과 벤치마크 합계 상한(`--max-total-usd`)** / 호출별 토큰 기록 / **토큰×단가 예상 비용** /
@@ -28,7 +32,11 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
   - 실제 Docker 컨테이너 실행(Windows의 `1000:1000` 사용자와 `C:\` 마운트 포함).
   - **큰 diff의 비용 예측(부분 검증)** — 2026-10-11 이 저장소의 실제 커밋 4건(6.6~36KB, HIGH)을 `devorch review` 로 측정: 입력 토큰 예측은 식을 고친 뒤 ±5%, 출력 토큰은 diff가 커질수록 늘고 편차가 커서
     점 추정(처음 −42%~+48% 오차)을 버리고 **범위**로 바꿨다. 그러나 그 범위는 *본 데이터에 맞춰 정한 것(in-sample)*이라 아직 검증이 아님 — **새 커밋으로 hold-out 검증 필요**(다음 할 일 1번).
-    약 1만 2천 토큰보다 큰 diff, 구현 단계 비용(고정값 $0.05), claude 토큰 계수는 여전히 미측정.
+    약 1만 2천 토큰보다 큰 diff, claude 토큰 계수는 여전히 미측정.
+  - **구현 단계 비용(첫 실측 1건, 2026-10-12):** 실제 `devorch run`(LOW, claude, 2줄 버그 수정): 입력 265 / 출력 182 토큰 → $2/$10 단가로 약 $0.00235. 예전 고정값 $0.05 는 약 21배 높았다.
+    그래서 구현 단계도 **실제 파일 내용 크기(입력) × 단가 + 가정한 출력 범위**(`IMPLEMENTATION_OUTPUT_TOKENS` 100/400/4000)로 계산하고 `limits.implementation_max_tokens`(16384)로 출력을 제한한다.
+    `devorch run` 과 `devorch analyze` 모두 적용(분석 예: `$0.0044 ($0.0014~$0.0404)`, 실측 $0.00235 는 범위 안). **n=1 이고 범위는 가정** — 큰 변경의 출력(diff 길이)은 미검증.
+    MCP `analyze_task` 는 아직 구현 단계를 고정값으로 계산함(CLI 와 다름).
   - **hold-out 결과(2026-10-11, 7개 새 리뷰):** 입력 14/14 호출이 −2~+6%, 출력 범위 12/14, 리뷰 비용 범위 6/7(밖 1건은 $0.0702 대 상한 $0.0668). 상한을 넓히고 Gemini 중간값을 보정 →
     모델은 다시 in-sample. **새 hold-out 필요.** 입력 약 4만 3천 토큰(리뷰 합계)보다 큰 diff는 미측정.
   - **이 리뷰들이 우리 코드의 실제 문제를 찾았고, 검증 후 고쳤다(원칙: 지적을 믿지 말고 재현):** NaN/inf 비용 상한·`--max-total-usd`·음수 단가가 상한을 무력화(재현·수정), Windows 에서 `npm`/`mvn`/`gradle`(.cmd) 이
@@ -64,8 +72,8 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
    자격증명 형태 문자열(테스트용 가짜 키)이 든 커밋은 우리 검사가 거부하니 제외. 밖이면 범위를 넓히고(테스트 `LARGE` 에 관측값 추가) 좁히지 않는다. 더 큰 diff(1만 2천 토큰 초과)도 최소 1건.
 2. **Claude Code 연결의 남은 부분**: (헤드리스 검증은 끝남) 사용자가 IDE 에서 `..\devorch-playground` 를 열어 서버 승인 UI 와 `.mcp.json` 프로젝트 범위 흐름을 확인하고, 사람 승인(`devorch approve`) 뒤 에이전트가
    `devorch_apply_changes` 로 커밋하는 뒷부분을 한 번 해 본다. 이후 mock 을 빼고 실제 리뷰어로 한 번(`--max-total-usd` 와 `limits.max_cost_usd` 사용).
-3. **구현 단계 비용 실측**: `devorch run`(구현 포함)을 소액으로 실행. 이제 출력이 구현 단계/리뷰 단계별 호출·토큰·비용과 예상을 따로 보여준다(`WorkflowRun.role_usage`).
-   여러 작업(작은 것~중간)으로 모아 `policy.estimates.cost_usd` 의 구현 고정값($0.05, 실측 없음)을 대체. `--apply` 없이도 구현 모델이 HEAD 파일 내용을 받도록 고쳤다(이전엔 --apply 일 때만 → diff 가 어긋남).
+3. **구현 단계 비용 실측 늘리기(n=1 → 여러 건)**: `devorch run`(구현 포함)을 소액으로 중간 크기 작업 여러 건 실행(작업 전에 `devorch analyze` 의 예상 범위를 적어 두고 실제와 비교 — hold-out).
+   출력이 구현/리뷰 단계별 호출·토큰·비용을 따로 보여준다(`WorkflowRun.role_usage`). 범위(`IMPLEMENTATION_OUTPUT_TOKENS`)가 틀리면 넓히고 좁히지 않는다. MCP `analyze_task` 도 `implementation_counts` 를 넘기게 할 것.
 4. **현실적 평가 세트**: 시드 결함 대신 실제 오픈소스 버그 수정 커밋(알려진 버그)으로 탐지율·비용 평가. 판정은 사람 확인이 섞인 정답 라벨 필요.
 5. 위 데이터로 HIGH 기본 정책(리뷰어 3명)을 재검토: 단일 교차 회사 리뷰어 + 초점 프롬프트가 같은 탐지를 3분의 1 비용에 하는지. CRITICAL 의 독립 리뷰어 2명은 비용이 아니라 통제 규칙이라 측정만으로 바꾸지 않는다.
 6. 포트폴리오 케이스 스터디의 "미검증" 항목을 실측으로 갱신. 한계를 숨기지 않는 것이 강점.

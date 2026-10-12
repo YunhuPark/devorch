@@ -17,7 +17,7 @@ from devorch.core.analyzer.task_analyzer import analyze_task
 from devorch.core.execution.sandbox import load_sandbox, sandbox_status
 from devorch.core.execution.executor import ExecutionError, Executor
 from devorch.core.execution.patch import extract_diff
-from devorch.core.orchestrator.engine import WorkflowEngine, WorkflowRun
+from devorch.core.orchestrator.engine import WorkflowEngine, WorkflowRun, implementation_prompt_counts
 from devorch.core.orchestrator.review import budget_preflight
 from devorch.core.router.cost_model import merge_prices, prices_from_config, prices_from_registry
 from devorch.core.router.model_router import plan_routing
@@ -75,7 +75,17 @@ def analyze(
 
     impact = analyze_impact(path, analysis)
     risk = assess_risk(analysis, impact)
-    plan = plan_routing(analysis, risk, impact, policy, prices=prices)
+    # Read-only: the implementation step's input is estimated from the real file contents (HEAD), as `run` does.
+    reader = Executor(path, policy, skip_tests=True)
+    try:
+        reader.ensure_ready()
+    except ExecutionError:
+        reader = None
+    sizing = WorkflowRun(task_text=task, analysis=analysis, impact=impact, risk=risk)
+    plan = plan_routing(
+        analysis, risk, impact, policy, prices=prices,
+        implementation_counts=implementation_prompt_counts(sizing, reader.file_context if reader else None),
+    )
 
     if as_json:
         typer.echo(
@@ -221,6 +231,14 @@ def run(
         typer.echo(f"오류: {e}", err=True)
         raise typer.Exit(2)
 
+    # Even without --apply the implementer must SEE the files (as of HEAD, read-only) or it can only guess context lines
+    # and the diff it writes won't apply. Without --apply nothing is applied, tested or created.
+    reader = Executor(path, policy, skip_tests=True)
+    try:
+        reader.ensure_ready()
+    except ExecutionError:
+        reader = None
+
     if mock:
         registry = ProviderRegistry()
         for name in ("claude", "openai", "gemini"):
@@ -228,7 +246,12 @@ def run(
     else:
         registry, skipped = build_registry(config)
         impact = analyze_impact(path, analysis)
-        plan = plan_routing(analysis, assess_risk(analysis, impact), impact, policy, prices=merge_prices(prices_from_config(config), prices_from_registry(registry)))
+        risk = assess_risk(analysis, impact)
+        sizing = WorkflowRun(task_text=task, analysis=analysis, impact=impact, risk=risk)
+        plan = plan_routing(
+            analysis, risk, impact, policy, prices=merge_prices(prices_from_config(config), prices_from_registry(registry)),
+            implementation_counts=implementation_prompt_counts(sizing, reader.file_context if reader else None),
+        )
         needed = sorted({s.provider for s in plan.steps})
         missing = [n for n in needed if n not in registry.names()]
         if missing:
@@ -242,9 +265,10 @@ def run(
             raise typer.Exit(2)
         typer.echo(f"위험도 {plan.level.value.upper()} — " + ", ".join(f"{s.role}={s.provider}" for s in plan.steps))
         bases = sorted({x.basis for x in plan.cost_breakdown})
+        rng = f", 범위 ${plan.estimated_cost_low_usd:.3f}~${plan.estimated_cost_high_usd:.3f}" if plan.estimated_cost_high_usd > plan.estimated_cost_low_usd else ""
         typer.echo(
-            f"실제 LLM API를 호출합니다 (예상 ~${plan.estimated_cost_usd:.3f}; 근거: {', '.join(bases)}. "
-            "구현 단계는 실측이 없고, diff 크기는 가정이며, 수정 라운드마다 반복될 수 있음)."
+            f"실제 LLM API를 호출합니다 (예상 ~${plan.estimated_cost_usd:.3f}{rng}; 근거: {', '.join(bases)}. "
+            "구현 단계의 출력은 작은 수정 1건만 실측한 가정이고, 리뷰할 diff 크기도 가정이며, 수정 라운드마다 반복될 수 있음)."
         )
         if policy.limits.max_cost_usd is not None:
             typer.echo(f"작업당 비용 상한: ${policy.limits.max_cost_usd} (호출 사이에서 검사 — 병렬로 진행 중인 호출만큼은 넘을 수 있음).")
@@ -252,13 +276,6 @@ def run(
             raise typer.Exit(1)
 
     executor = None
-    # Even without --apply the implementer must SEE the files (as of HEAD, read-only) or it can only guess context lines
-    # and the diff it writes won't apply. Without --apply nothing is applied, tested or created.
-    reader = Executor(path, policy, skip_tests=True)
-    try:
-        reader.ensure_ready()
-    except ExecutionError:
-        reader = None
     if apply:
         executor = Executor(
             path,

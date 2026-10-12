@@ -89,6 +89,32 @@ def estimate_counts(
     return CallEstimate(usd(mid), usd(lo), usd(hi), in_tok, mid, lo, hi, measured)
 
 
+# The implementation step writes a diff. ONE real observation so far (2026-10-12, claude-sonnet-5-5, a 2-line fix: 265 in / 182 out), so
+# the output range is an ASSUMPTION spanning "tiny fix" to "multi-file change"; the input is computed from the real file contents.
+IMPLEMENTATION_OUTPUT_TOKENS = {"low": 100, "mid": 400, "high": 4000}
+
+
+def estimate_implementation(
+    provider: str, ascii_chars: int, nonascii_chars: int, prices: Prices | None, max_output_tokens: int | None = None
+) -> CallEstimate:
+    """One implementation call: input from the real prompt (system + context + file contents), output from a flagged assumed range."""
+    in_tok = round(ascii_chars / ASCII_CHARS_PER_TOKEN.get(provider, ASSUMED_ASCII_CHARS_PER_TOKEN) + nonascii_chars * NONASCII_TOKENS_PER_CHAR)
+
+    def out(which: str) -> int:
+        tokens = IMPLEMENTATION_OUTPUT_TOKENS[which]
+        return min(tokens, max_output_tokens) if max_output_tokens else tokens
+
+    lo, mid, hi = out("low"), out("mid"), out("high")
+    p = (prices or {}).get(provider) or {}
+    if "input_per_mtok" not in p or "output_per_mtok" not in p:
+        return CallEstimate(None, None, None, in_tok, mid, lo, hi, False)
+
+    def usd(out_tokens: int) -> float:
+        return (in_tok * p["input_per_mtok"] + out_tokens * p["output_per_mtok"]) / 1_000_000
+
+    return CallEstimate(usd(mid), usd(lo), usd(hi), in_tok, mid, lo, hi, False)
+
+
 def estimate_call(provider: str, prompt: str, prices: Prices | None, max_output_tokens: int | None = None) -> CallEstimate:
     """Estimate one call from its prompt text (system prompt + user prompt)."""
     a, n = count_chars(prompt)

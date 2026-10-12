@@ -302,3 +302,99 @@ def test_cli_analyze_shows_the_basis_and_the_range_of_the_estimate(tmp_path):
     assert priced.exit_code == 0 and "토큰×단가" in priced.output and "가정" in priced.output and "범위" in priced.output
     js = json.loads(runner.invoke(app, ["analyze", HIGH_TASK, "-p", str(tmp_path), "--json"]).output)
     assert any(x["basis"] == "토큰×단가" for x in js["plan"]["cost_breakdown"])
+
+
+# ---- the implementation step (first real observation: 2026-10-12, claude-sonnet-5-5, a 2-line fix) ---------------------------
+from devorch.core.orchestrator.engine import IMPLEMENTER_SYSTEM, WorkflowEngine, implementation_prompt_counts  # noqa: E402
+from devorch.core.router.cost_model import estimate_implementation  # noqa: E402
+
+CL_PRICES = {"claude": CL}
+
+
+def test_the_implementation_estimate_has_a_flagged_output_range_and_a_real_input_size():
+    e = estimate_implementation("claude", 3000, 0, CL_PRICES)
+    assert not e.measured and e.input_tokens == 1000
+    assert e.output_low < e.output_tokens < e.output_high
+    assert e.usd_low < e.usd < e.usd_high
+    assert estimate_implementation("claude", 3000, 0, None).usd is None  # no price: unknown, never 0
+
+
+def test_the_one_real_implementation_observation_is_inside_the_range_and_the_flat_guess_was_far_too_high():
+    # 265 input / 182 output tokens for a 2-line bug fix, billed at $2/$10 per Mtok
+    actual = (265 * 2.0 + 182 * 10.0) / 1e6
+    e = estimate_implementation("claude", 265 * 3, 0, CL_PRICES)
+    assert e.usd_low <= actual <= e.usd_high
+    assert 0.05 > 20 * actual  # the old flat default
+
+
+def test_the_output_budget_caps_the_implementation_range():
+    assert estimate_implementation("claude", 3000, 0, CL_PRICES, max_output_tokens=1024).output_high == 1024
+
+
+def test_a_plan_uses_the_implementation_model_only_with_a_price_and_a_prompt_size():
+    a, n = 3000, 0
+    p = plan(files=["a.py"], prices=CL_PRICES, policy=None)  # no implementation counts passed: still the flat default
+    assert next(x for x in p.cost_breakdown if x.role == "implementation").basis == "기본 고정값"
+    analysis = analyze_task("버튼 텍스트 변경")
+    impact = ImpactReport(direct_files=["a.py"])
+    risk = assess_risk(analysis, impact)
+    priced = plan_routing(analysis, risk, impact, Policy(), prices=CL_PRICES, implementation_counts=(a, n))
+    impl = next(x for x in priced.cost_breakdown if x.role == "implementation")
+    assert impl.basis.startswith("토큰×단가") and "가정" in impl.basis and impl.usd < 0.05 and impl.usd_low < impl.usd < impl.usd_high
+    assert any("구현" in note and "1건" in note for note in priced.notes)
+    unpriced = plan_routing(analysis, risk, impact, Policy(), prices={}, implementation_counts=(a, n))
+    assert next(x for x in unpriced.cost_breakdown if x.role == "implementation").basis == "기본 고정값"
+
+
+def test_the_implementation_prompt_size_counts_the_real_file_contents(tmp_path, repo):
+    analysis = analyze_task("calc.py add 버그 수정")
+    impact = ImpactReport(direct_files=["calc.py"])
+    run = WorkflowRun(task_text="calc.py add 버그 수정", analysis=analysis, impact=impact, risk=assess_risk(analysis, impact))
+    small = implementation_prompt_counts(run, None)
+    reader = Executor(repo, Policy(), skip_tests=True)
+    with_files = implementation_prompt_counts(run, reader.file_context)
+    assert sum(with_files) > sum(small) >= len(IMPLEMENTER_SYSTEM)
+    (repo / "calc.py").write_text("def add(a, b):\n    return a - b\n" + "# pad\n" * 800, encoding="utf-8")
+    run_git(repo, "commit", "-q", "-am", "bigger")
+    assert sum(implementation_prompt_counts(run, reader.file_context)) > sum(with_files) + 3000  # file size drives the input estimate
+
+
+async def test_the_engine_plans_with_the_real_file_size_and_requests_the_implementation_output_budget(repo):
+    seen = []
+    claude = MockProvider("claude", ["diff"])
+    reg = ProviderRegistry()
+    for p in (claude, MockProvider("openai", ["[]"]), MockProvider("gemini", ["[]"])):
+        reg.register(p)
+    pol = Policy.model_validate({"limits": {"implementation_max_tokens": 9000}})
+    reader = Executor(repo, pol, skip_tests=True)
+    run = await WorkflowEngine(repo, pol, reg, context_provider=reader.file_context, approver=lambda r: True).run("calc.py add 버그 수정")
+    assert claude.calls and claude.calls[0].max_tokens == 9000
+    assert "return a - b" in claude.calls[0].prompt  # the real file reached the implementer
+    assert run.plan is not None
+
+
+def test_implementation_max_tokens_has_a_roomy_default_and_validation():
+    assert Policy().limits.implementation_max_tokens == 16384
+    for bad in (0, 512, 70000):
+        with pytest.raises(ValueError):
+            Policy.model_validate({"limits": {"implementation_max_tokens": bad}})
+
+
+def test_cli_analyze_sizes_the_implementation_step_from_the_real_file(repo):
+    """`analyze` used to show the flat $0.05 for the implementation step; it now uses the file's real size, like `run`."""
+    cfgp = repo / ".devorch" / "config.yaml"
+    CliRunner().invoke(app, ["init", "-p", str(repo)])
+    cfg = yaml.safe_load(cfgp.read_text(encoding="utf-8"))
+    cfg["providers"]["claude"].update(CL)
+    cfgp.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+
+    def impl_line(task):
+        js = json.loads(CliRunner().invoke(app, ["analyze", task, "-p", str(repo), "--json"]).output)
+        return next(x for x in js["plan"]["cost_breakdown"] if x["role"] == "implementation")
+
+    small = impl_line("calc.py add 버그 수정")
+    assert small["basis"].startswith("토큰×단가") and small["usd"] < 0.05  # not the flat default
+    (repo / "calc.py").write_text("def add(a, b):\n    return a - b\n" + "# filler line to make the file big\n" * 300, encoding="utf-8")
+    run_git(repo, "add", "-A")
+    run_git(repo, "commit", "-q", "-m", "big")
+    assert impl_line("calc.py add 버그 수정")["input_tokens"] > 10 * small["input_tokens"]

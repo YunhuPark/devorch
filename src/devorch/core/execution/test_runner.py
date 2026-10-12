@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from devorch.core.execution.winjob import Job
 from devorch.security.command_policy import check_command, split_command
 
 OUTPUT_TAIL_CHARS = 4000
@@ -109,9 +110,11 @@ def _new_group_kwargs() -> dict:
     return {"start_new_session": True}
 
 
-async def _kill_tree(proc: asyncio.subprocess.Process) -> None:
+async def _kill_tree(proc: asyncio.subprocess.Process, job: Job | None = None) -> None:
     """Kill the process and its descendants (best effort; the process itself is always killed)."""
     if os.name == "nt":
+        if job is not None:
+            job.terminate()  # atomic: also catches processes created while a tree walk would be running
         try:
             killer = await asyncio.create_subprocess_exec(
                 "taskkill", "/PID", str(proc.pid), "/T", "/F",
@@ -163,12 +166,16 @@ async def run_tests(
     except OSError as e:  # e.g. PermissionError — the tests did not run, which must never read as "passed"
         return TestResult(False, command, None, "", f"테스트 명령을 실행하지 못함: {e}")
 
+    job = Job.attach(proc.pid)  # None off Windows or if it fails: _kill_tree then falls back to taskkill
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
     except asyncio.TimeoutError:
-        await _kill_tree(proc)
+        await _kill_tree(proc, job)
         await proc.wait()
         return TestResult(False, command, None, "", f"테스트가 {timeout_s:.0f}초 내에 끝나지 않아 중단됨")
+    finally:
+        if job is not None:
+            job.close()  # also ends background processes the tests left running
 
     text = out.decode("utf-8", errors="replace")
     return TestResult(proc.returncode == 0, command, proc.returncode, text[-OUTPUT_TAIL_CHARS:])

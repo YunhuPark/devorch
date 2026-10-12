@@ -48,12 +48,14 @@ class LimitsPolicy(BaseModel):
     # Output budget per reviewer call. Thinking models (Gemini) spend part of it on thoughts: 4096 was too small for a ~9k-token diff
     # (the review was cut off and still billed). A higher budget costs nothing unless the model actually uses it.
     review_max_tokens: int = 8192
+    # Output budget for the implementation call (it writes the whole diff). 4096 would cut off a multi-file change.
+    implementation_max_tokens: int = 16384
 
-    @field_validator("review_max_tokens")
+    @field_validator("review_max_tokens", "implementation_max_tokens")
     @classmethod
-    def _review_budget(cls, v: int) -> int:
+    def _output_budget(cls, v: int) -> int:
         if not 1024 <= v <= 65536:
-            raise ValueError("limits.review_max_tokens must be between 1024 and 65536")
+            raise ValueError("output token budgets (limits.review_max_tokens / implementation_max_tokens) must be between 1024 and 65536")
         return v
 
     @field_validator("max_cost_usd")

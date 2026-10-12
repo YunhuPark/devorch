@@ -295,3 +295,25 @@ def test_cli_apply_with_mock_fails_closed_without_a_diff(repo):
     r = CliRunner().invoke(app, ["run", "calc.py add 버그 수정", "-p", str(repo), "--mock", "--apply", "--no-tests"])
     assert r.exit_code == 1 and "unified diff를 찾지 못함" in r.output
     assert branches(repo) == []
+
+
+async def test_timeout_leaves_no_process_behind_when_children_are_still_being_spawned(tmp_path):
+    """The tree walk of `taskkill /T` can miss a process created while it runs; the timeout must hit while the test is still forking."""
+    out = str(tmp_path)
+    child = "import time, pathlib, sys; time.sleep(3); pathlib.Path(sys.argv[1], 'child_' + sys.argv[2] + '.txt').write_text('x')"
+    (tmp_path / "test_fork.py").write_text(
+        "import subprocess, sys, time\n\n"
+        "def test_fork():\n"
+        "    end = time.time() + 10\n"
+        "    i = 0\n"
+        "    while time.time() < end:  # keeps forking until it is killed\n"
+        "        i += 1\n"
+        f"        subprocess.Popen([sys.executable, '-c', {child!r}, {out!r}, str(i)])\n"
+        "        time.sleep(0.02)\n",
+        encoding="utf-8",
+    )
+    r = await run_tests(PYTEST_CMD, tmp_path, [PYTEST_CMD], 2.5)
+    assert not r.ok and "중단" in r.reason
+    await asyncio.sleep(5)  # long enough for any orphan to have written its file
+    survivors = sorted(p.name for p in tmp_path.glob("child_*.txt"))
+    assert not survivors, f"{len(survivors)} child processes survived the timeout: {survivors[:3]}"
