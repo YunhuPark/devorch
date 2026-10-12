@@ -150,7 +150,12 @@ claude mcp add devorch -- devorch mcp -p /path/to/project
 (`--mock` 은 가짜 리뷰어라 비용이 없는 연결 시험용입니다. 실제 리뷰를 받으려면 빼세요. `devorch doctor` 의 "MCP 등록" 줄이 이 프로젝트용 명령을 만들어 줍니다.)
 에이전트가 도구를 올바른 순서로 쓰게 하려면 프로젝트의 `CLAUDE.md` 에 흐름을 적어 두세요(분석 → 구현(커밋 금지) → 리뷰 → 테스트 → 적용, `approval_required` 면 멈추고 사람이 터미널에서
 `devorch approve <task_id>`; 승인을 대신하지 않기; diff 가 바뀌면 리뷰·테스트를 다시). 예시는 `devorch-playground/CLAUDE.md` 를 참고하세요.
-**실제 Claude Code 앱에서의 연결은 아직 검증하지 못했습니다**(stdio 하위 프로세스로는 검증됨).
+**검증 범위(2026-10-12):** 실제 Claude Code 2.1.293(`claude -p`, `--mcp-config`, 모델 `claude-sonnet-5-5`)가 연습 프로젝트의 복사본에서 `devorch` MCP 서버에 `connected` 로 붙고 도구 8개를 인식해
+`CLAUDE.md` 의 순서를 따랐습니다(`--mock`, 즉 가짜 리뷰어). ① LOW 작업은 분석 → 수정 → 리뷰 → 테스트 → 적용으로 새 `devorch/...` 브랜치에 커밋되고 `main` 은 그대로였고,
+② 기존 테스트가 실패하는 상태에서는 `apply_changes` 로 가지 못하고 에이전트가 그대로 보고했으며, ③ CRITICAL 작업은 `approval_required` 에서 멈춰 사람에게 `devorch approve <id>` 를 안내했습니다
+(승인 파일 없음, 추가 커밋 0, 비대화형 `approve` 는 거부). **검증하지 못한 것:** IDE(앱)의 MCP 서버 승인 화면, `.mcp.json` 프로젝트 범위 서버의 승인 흐름(헤드리스에서는 설정을 직접 넘김),
+사람이 승인한 뒤 에이전트가 다시 `apply_changes` 를 호출하는 뒷부분(승인은 설계상 TTY 가 필요해 자동화하지 않음), 실제 리뷰어(mock 아님)와 함께 쓰는 경우.
+셸·파일 쓰기 권한이 있는 에이전트는 승인 파일을 직접 쓸 수 있다는 기존 한계는 그대로입니다(위 시험은 Bash·Write 를 막은 상태).
 
 에이전트(Claude)가 따르는 흐름 — 코드는 **에이전트가 자기 작업 트리에서 작성**하고, DevOrch는 무엇이 반영될 수 있는지만 통제합니다.
 

@@ -22,7 +22,9 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 - **실제로 확인한 것:** Anthropic(`claude-sonnet-5-5`), OpenAI(`gpt-6-sol`), Gemini(`gemini-3.6-flash`)의 실제 호출 성공, Windows에서 실제 stdio 하위 프로세스로 MCP 전체 흐름,
   OpenAI 사용량 화면과 DevOrch 집계의 일치(요청 6회, 입력 1,734 토큰, 지출 $0.02), 단가는 Claude 공식 페이지 원문으로 확인.
 - **검증하지 못한 것(검증했다고 쓰지 말 것):**
-  - **실제 MCP 클라이언트(Claude Code 등) 연결** — 연습 프로젝트(`..\devorch-playground`, `.mcp.json` 포함)를 만들어 뒀지만 사람이 앱에서 확인해야 함.
+  - **Claude Code IDE 화면에서의 연결** — 실제 Claude Code 2.1.293 을 헤드리스(`claude -p --mcp-config ... --strict-mcp-config`)로 돌려 연결과 전체 흐름(LOW 커밋, 테스트 실패 시 적용 거부, CRITICAL 에서 approval_required 정지)은
+    2026-10-12 에 확인함(mock 리뷰어, 복사본에서). 남은 것: IDE 의 서버 승인 UI, `.mcp.json` 프로젝트 범위 승인 흐름, 사람 승인 뒤 에이전트가 다시 적용하는 뒷부분, 실제 리뷰어와 함께. 실행 파일 위치:
+    `C:\Users\qkrdb\.antigravity-ide\extensions\anthropic.claude-code-*\resources\native-binary\claude.exe`. 이 시험은 사용자의 Claude 구독 사용량을 쓴다(실행당 환산 $0.16~0.19) — 사용자 동의 후에만.
   - 실제 Docker 컨테이너 실행(Windows의 `1000:1000` 사용자와 `C:\` 마운트 포함).
   - **큰 diff의 비용 예측(부분 검증)** — 2026-10-11 이 저장소의 실제 커밋 4건(6.6~36KB, HIGH)을 `devorch review` 로 측정: 입력 토큰 예측은 식을 고친 뒤 ±5%, 출력 토큰은 diff가 커질수록 늘고 편차가 커서
     점 추정(처음 −42%~+48% 오차)을 버리고 **범위**로 바꿨다. 그러나 그 범위는 *본 데이터에 맞춰 정한 것(in-sample)*이라 아직 검증이 아님 — **새 커밋으로 hold-out 검증 필요**(다음 할 일 1번).
@@ -60,8 +62,8 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 ## 지금 할 일 (우선순위)
 1. **비용 범위의 hold-out 검증**: 4건으로 정한 출력 범위를 *새로운* 커밋 6~8개(`devorch review --git-range <커밋>~1..<커밋> --task "코드 변경 리뷰" --level high`)에 적용해 실제 값이 범위 안에 드는 비율을 센다.
    자격증명 형태 문자열(테스트용 가짜 키)이 든 커밋은 우리 검사가 거부하니 제외. 밖이면 범위를 넓히고(테스트 `LARGE` 에 관측값 추가) 좁히지 않는다. 더 큰 diff(1만 2천 토큰 초과)도 최소 1건.
-2. **Claude Code 실연결**: `..\devorch-playground` 를 IDE로 열어 `.mcp.json`(venv python -m devorch, `--mock`)의 서버를 승인하고 `CLAUDE.md` 의 흐름으로 전체를 한 번 돌린다(우리가 한 검증은 stdio 하위 프로세스까지).
-   막히는 곳은 `devorch doctor` 출력/README 에 반영. 결과를 받으면 mock 을 빼고 실제 리뷰로도 한 번.
+2. **Claude Code 연결의 남은 부분**: (헤드리스 검증은 끝남) 사용자가 IDE 에서 `..\devorch-playground` 를 열어 서버 승인 UI 와 `.mcp.json` 프로젝트 범위 흐름을 확인하고, 사람 승인(`devorch approve`) 뒤 에이전트가
+   `devorch_apply_changes` 로 커밋하는 뒷부분을 한 번 해 본다. 이후 mock 을 빼고 실제 리뷰어로 한 번(`--max-total-usd` 와 `limits.max_cost_usd` 사용).
 3. **구현 단계 비용 실측**: `devorch run`(구현 포함)을 소액으로 실행. 이제 출력이 구현 단계/리뷰 단계별 호출·토큰·비용과 예상을 따로 보여준다(`WorkflowRun.role_usage`).
    여러 작업(작은 것~중간)으로 모아 `policy.estimates.cost_usd` 의 구현 고정값($0.05, 실측 없음)을 대체. `--apply` 없이도 구현 모델이 HEAD 파일 내용을 받도록 고쳤다(이전엔 --apply 일 때만 → diff 가 어긋남).
 4. **현실적 평가 세트**: 시드 결함 대신 실제 오픈소스 버그 수정 커밋(알려진 버그)으로 탐지율·비용 평가. 판정은 사람 확인이 섞인 정답 라벨 필요.
