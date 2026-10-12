@@ -327,6 +327,31 @@ def test_the_one_real_implementation_observation_is_inside_the_range_and_the_fla
     assert 0.05 > 20 * actual  # the old flat default
 
 
+def test_the_second_real_implementation_observation_was_a_holdout_and_fell_inside_the_range_but_far_above_the_midpoint():
+    # 2026-10-12, "add divide() + ValueError + test": 273 input / 1155 output tokens, billed $0.0121; the estimate was made BEFORE the call
+    # ($0.0045, range $0.0015~$0.0405). Inside the range, 2.7x the midpoint: the midpoint is not a prediction, only the range is usable.
+    actual = (273 * 2.0 + 1155 * 10.0) / 1e6
+    e = estimate_implementation("claude", 273 * 3, 0, CL_PRICES)
+    assert e.usd_low <= actual <= e.usd_high
+    assert actual > 2 * e.usd
+
+
+def test_the_run_summary_does_not_call_a_token_based_implementation_estimate_a_flat_value(capsys):
+    from devorch.cli.main import _print_run
+    from devorch.core.orchestrator.engine import WorkflowRun
+    from devorch.models import CostLine, RoutingPlan
+
+    def out(basis):
+        plan = RoutingPlan(level="low", steps=[], requires_human_approval=False, approval_reasons=[], run_tests=True, verification_level="BASIC",
+                           estimated_cost_usd=0.01, cost_breakdown=[CostLine(role="implementation", provider="claude", usd=0.01, basis=basis)])
+        _print_run(WorkflowRun(task_text="t", plan=plan))
+        return capsys.readouterr().out
+
+    assert "implementation(claude)는 고정값(실측 아님)" in out("기본 고정값")
+    token = out("토큰×단가(구현: 출력은 가정)")
+    assert "고정값" not in token and "가정한 범위" in token
+
+
 def test_the_output_budget_caps_the_implementation_range():
     assert estimate_implementation("claude", 3000, 0, CL_PRICES, max_output_tokens=1024).output_high == 1024
 

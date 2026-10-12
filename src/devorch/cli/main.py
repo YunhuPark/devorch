@@ -172,7 +172,9 @@ def _print_run(run: WorkflowRun) -> None:
     if plan:
         lo, hi = plan.estimated_cost_low_usd, plan.estimated_cost_high_usd
         est = f"예상 ${plan.estimated_cost_usd:.4f}" + (f" (범위 ${lo:.4f}~${hi:.4f})" if hi > lo else "")
-        typer.echo(f"  Cost: {cost}   [{est}; 구현 단계는 고정값이며 수정 라운드(rounds={run.rounds})는 예상에 한 번만 들어 있음]")
+        flat = [f"{x.role}({x.provider})" for x in plan.cost_breakdown if x.basis == "기본 고정값"]
+        basis = f"{', '.join(flat)}는 고정값(실측 아님)" if flat else "구현 단계 출력은 가정한 범위"
+        typer.echo(f"  Cost: {cost}   [{est}; {basis}이며 수정 라운드(rounds={run.rounds})는 예상에 한 번만 들어 있음]")
     else:
         typer.echo(f"  Cost: {cost}")
     for role, u in run.role_usage.items():

@@ -89,8 +89,9 @@ def estimate_counts(
     return CallEstimate(usd(mid), usd(lo), usd(hi), in_tok, mid, lo, hi, measured)
 
 
-# The implementation step writes a diff. ONE real observation so far (2026-10-12, claude-sonnet-5-5, a 2-line fix: 265 in / 182 out), so
-# the output range is an ASSUMPTION spanning "tiny fix" to "multi-file change"; the input is computed from the real file contents.
+# The implementation step writes a diff. TWO real observations so far (2026-10-12, claude-sonnet-5-5): a 2-line fix 265 in / 182 out (the range
+# was set after seeing it), then a hold-out "add divide() + test" 273 in / 1155 out — inside the range but ~3x the midpoint. So the output
+# range is still an ASSUMPTION spanning "tiny fix" to "multi-file change" (use the range, not the midpoint); input is the real file contents.
 IMPLEMENTATION_OUTPUT_TOKENS = {"low": 100, "mid": 400, "high": 4000}
 
 
