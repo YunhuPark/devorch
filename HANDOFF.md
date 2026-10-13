@@ -18,7 +18,10 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 - **설치·플랫폼 검증(2026-10-13, "사용자 실사용" 1단계):** 휠을 깨끗한 venv(짧은 경로)에 설치해 키 없이 `init → analyze → doctor → run --mock → bench cases` 가 모두 동작(패키지 데이터 포함, 출력을 파이프로 보낸 cp949 상태에서도).
   찾아 고친 것: 출력이 리다이렉트되면(cp949) `devorch doctor` 가 `—` 때문에 UnicodeEncodeError 로 죽음 → 출력 인코딩 오류를 `?` 로 대체(수정 전 실패 확인한 테스트).
   재현한 함정: 깊은 폴더에 `pip install` 하면 anthropic 패키지의 긴 파일명 때문에 Windows 경로 제한으로 실패(README 에 안내). `devorch.exe` 는 이 설치에서 정상 — 사용자의 관리자 창 실패는 여전히 원인 미확인.
-  `.github/workflows/ci.yml`(Windows/Linux/macOS × py3.11/3.12 + 휠 깨끗한 설치 작업) 작성 — **아직 한 번도 실행되지 않음(푸시 전)**. Linux/macOS 는 여전히 미검증.
+  **CI(GitHub Actions, 2026-10-13): Windows/Linux/macOS × Python 3.11/3.12 테스트 6개 + 깨끗한 설치 3개 모두 통과**(실행 2번째; 첫 실행은 9개 모두 실패 — 아래).
+  첫 실행이 드러낸 것: (1) `devorch --help` 가 리다이렉트된 출력(cp1252/cp949)에서 UnicodeEncodeError 로 죽음 — Typer 콜백보다 `--help` 가 먼저 처리돼서 import 시점으로 옮겨 수정,
+  (2)(3) 테스트 가정 2건(subprocess 출력 인코딩·색, 대소문자 구분 파일시스템에서의 PATHEXT) — 제품 코드 문제 아님. 로컬 Windows 에서는 못 보던 것들이라 CI 가치가 확인됨.
+  Linux/macOS 는 이제 **테스트 스위트와 깨끗한 설치 수준에서** 확인됨. 여전히 미검증: Linux/macOS 에서의 실제 `devorch run --apply`/MCP 사용, 실제 Docker, 실제 npm/mvn/gradle.
   WSL(Ubuntu, python 3.14.4)에서의 시도는 `python3-venv`/pip 부재로 중단(sudo 설치가 필요해 사용자 시스템을 건드리지 않음).
 - **타임아웃 프로세스 트리 종료(2026-10-12 수정):** `taskkill /T` 는 프로세스 트리의 스냅샷을 따라 걷기 때문에, 종료 도중 새로 만들어진 자식이 살아남았다
   (계속 fork 하는 테스트로 재현: 타임아웃 뒤 자식 6개 생존, 3/3 실패). `core/execution/winjob.py`(Windows Job Object, ctypes, KILL_ON_JOB_CLOSE)로 바꾸고
