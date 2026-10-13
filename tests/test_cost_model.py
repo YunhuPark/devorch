@@ -423,3 +423,15 @@ def test_cli_analyze_sizes_the_implementation_step_from_the_real_file(repo):
     run_git(repo, "add", "-A")
     run_git(repo, "commit", "-q", "-m", "big")
     assert impl_line("calc.py add 버그 수정")["input_tokens"] > 10 * small["input_tokens"]
+
+
+def test_mcp_analyze_does_not_count_the_clients_implementation_as_devorch_spend(repo):
+    """In the MCP flow the client agent writes the code; DevOrch only pays for reviews (and its cap only counts those)."""
+    cfg = {"providers": {"claude": CL, "openai": OA, "gemini": GE}}
+    res = make_plane(repo, cfg).analyze_task(HIGH_TASK + " calc.py")
+    assert res["required_reviews"] and all(x["role"] != "implementation" for x in res["cost_breakdown"])
+    assert res["estimated_cost_usd"] == pytest.approx(sum(x["usd"] for x in res["cost_breakdown"]))
+    assert res["estimated_cost_range_usd"][0] < res["estimated_cost_usd"] < res["estimated_cost_range_usd"][1]
+    assert any("구현은 클라이언트" in n for n in res["cost_notes"])
+    low = make_plane(repo, cfg).analyze_task("calc.py add 버그 수정")  # LOW: no reviewers at all
+    assert not low["required_reviews"] and low["estimated_cost_usd"] == 0 and low["estimated_cost_range_usd"] == [0, 0]

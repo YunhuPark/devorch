@@ -13,7 +13,7 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 설치: `python -m venv .venv` → `.venv\Scripts\Activate.ps1` → `pip install -e ".[dev,llm]"` → `pytest`. 막히면 `devorch doctor`.
 
 ## 현재 상태 (2026-10-09, 사실만)
-- **테스트: Windows 네이티브에서 452 passed, 1 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
+- **테스트: Windows 네이티브에서 453 passed, 1 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
   이 PC의 `git.exe` 실행이 간헐적으로 거부됨(WinError 5, 원인 미확정, `git/manager.py` 에 Windows 한정 재시도 완화책).
 - **설치·플랫폼 검증(2026-10-13, "사용자 실사용" 1단계):** 휠을 깨끗한 venv(짧은 경로)에 설치해 키 없이 `init → analyze → doctor → run --mock → bench cases` 가 모두 동작(패키지 데이터 포함, 출력을 파이프로 보낸 cp949 상태에서도).
   찾아 고친 것: 출력이 리다이렉트되면(cp949) `devorch doctor` 가 `—` 때문에 UnicodeEncodeError 로 죽음 → 출력 인코딩 오류를 `?` 로 대체(수정 전 실패 확인한 테스트).
@@ -50,7 +50,8 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
     **저장된 제안 diff 검증(2026-10-12):** `.devorch/runs/81d904d3.diff` 를 복사본에 `git apply` 해 보니 적용되고 새 테스트 5개 통과(실패 1개는 플레이그라운드에 일부러 심은 `add` 버그).
     그 과정에서 **실제 버그 발견·수정:** 저장 시 텍스트 모드로 써서 Windows 에서 모든 줄이 CRLF 가 됨(저장본 42줄 모두 CR) → LF 파일에는 `git apply` 가 안 맞을 수 있었음. 바이트 그대로 쓰도록 수정, 테스트 추가(수정 전 실패 확인).
     분석기가 이 작업을 TEST 유형으로 분류함("테스트 추가" 때문, 실제로는 기능 추가) — 키워드 휴리스틱의 한계, 미수정.
-    MCP `analyze_task` 는 아직 구현 단계를 고정값으로 계산함(CLI 와 다름).
+    MCP `analyze_task`: 이 흐름에서는 클라이언트(에이전트)가 구현하고 DevOrch 는 리뷰어만 호출하므로, 구현 단계는 **DevOrch 비용에서 제외**(합계·범위·내역 모두; 이전엔 DevOrch 가 쓰지 않는 구현 비용이 합계에 들어 있었음).
+    LOW 작업은 리뷰어가 없어 예상 $0. 클라이언트의 구현 비용은 DevOrch 가 측정하지 않음(Claude Code 구독 사용량 등).
   - **hold-out 결과(2026-10-11, 7개 새 리뷰):** 입력 14/14 호출이 −2~+6%, 출력 범위 12/14, 리뷰 비용 범위 6/7(밖 1건은 $0.0702 대 상한 $0.0668). 상한을 넓히고 Gemini 중간값을 보정 →
     모델은 다시 in-sample. **새 hold-out 필요.** 입력 약 4만 3천 토큰(리뷰 합계)보다 큰 diff는 미측정.
   - **이 리뷰들이 우리 코드의 실제 문제를 찾았고, 검증 후 고쳤다(원칙: 지적을 믿지 말고 재현):** NaN/inf 비용 상한·`--max-total-usd`·음수 단가가 상한을 무력화(재현·수정), Windows 에서 `npm`/`mvn`/`gradle`(.cmd) 이
@@ -87,7 +88,7 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 2. **Claude Code 연결의 남은 부분**: (헤드리스 검증은 끝남) 사용자가 IDE 에서 `..\devorch-playground` 를 열어 서버 승인 UI 와 `.mcp.json` 프로젝트 범위 흐름을 확인하고, 사람 승인(`devorch approve`) 뒤 에이전트가
    `devorch_apply_changes` 로 커밋하는 뒷부분을 한 번 해 본다. 이후 mock 을 빼고 실제 리뷰어로 한 번(`--max-total-usd` 와 `limits.max_cost_usd` 사용).
 3. **구현 단계 비용 실측 늘리기(n=1 → 여러 건)**: `devorch run`(구현 포함)을 소액으로 중간 크기 작업 여러 건 실행(작업 전에 `devorch analyze` 의 예상 범위를 적어 두고 실제와 비교 — hold-out).
-   출력이 구현/리뷰 단계별 호출·토큰·비용을 따로 보여준다(`WorkflowRun.role_usage`). 범위(`IMPLEMENTATION_OUTPUT_TOKENS`)가 틀리면 넓히고 좁히지 않는다. MCP `analyze_task` 도 `implementation_counts` 를 넘기게 할 것.
+   출력이 구현/리뷰 단계별 호출·토큰·비용을 따로 보여준다(`WorkflowRun.role_usage`). 범위(`IMPLEMENTATION_OUTPUT_TOKENS`)가 틀리면 넓히고 좁히지 않는다.
 4. **현실적 평가 세트**: 시드 결함 대신 실제 오픈소스 버그 수정 커밋(알려진 버그)으로 탐지율·비용 평가. 판정은 사람 확인이 섞인 정답 라벨 필요.
 5. 위 데이터로 HIGH 기본 정책(리뷰어 3명)을 재검토: 단일 교차 회사 리뷰어 + 초점 프롬프트가 같은 탐지를 3분의 1 비용에 하는지. CRITICAL 의 독립 리뷰어 2명은 비용이 아니라 통제 규칙이라 측정만으로 바꾸지 않는다.
 6. 포트폴리오 케이스 스터디의 "미검증" 항목을 실측으로 갱신. 한계를 숨기지 않는 것이 강점.

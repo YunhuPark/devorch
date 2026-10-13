@@ -229,6 +229,9 @@ class ControlPlane:
         self._log(record, "analyze_task", task=run.task_text, risk=risk.level.value)
 
         reviewers = [{"role": s.role, "provider": s.provider} for s in plan.review_steps]
+        # Here the client agent writes the code in its own tree; DevOrch's own LLM calls are the reviews only (and the cost cap counts
+        # only those). The plan's implementation step is not DevOrch spend, so it stays out of the totals instead of inflating them.
+        spend = [line for line in plan.cost_breakdown if line.role != "implementation"]
         return {
             "task_id": run.id,
             "task_type": analysis.task_type.value,
@@ -246,10 +249,11 @@ class ControlPlane:
             "requires_human_approval": plan.requires_human_approval,
             "approval_reasons": plan.approval_reasons,
             "verification_level": plan.verification_level,
-            "estimated_cost_usd": plan.estimated_cost_usd,
-            "estimated_cost_range_usd": [plan.estimated_cost_low_usd, plan.estimated_cost_high_usd],
-            "cost_breakdown": [line.model_dump() for line in plan.cost_breakdown],
-            "cost_notes": [n for n in plan.notes if n.startswith("비용")],
+            "estimated_cost_usd": round(sum(x.usd for x in spend), 6),
+            "estimated_cost_range_usd": [round(sum(x.usd_low for x in spend), 6), round(sum(x.usd_high for x in spend), 6)],
+            "cost_breakdown": [line.model_dump() for line in spend],
+            "cost_notes": [n for n in plan.notes if n.startswith("비용")]
+            + ["DevOrch가 호출하는 리뷰어 비용만 합산합니다. 구현은 클라이언트(에이전트)가 하므로 그 비용은 포함되지 않습니다(DevOrch가 측정하지 않음)."],
             "next_step": "작업 트리에서 코드를 구현한 뒤 devorch_request_review 를 호출하세요.",
         }
 

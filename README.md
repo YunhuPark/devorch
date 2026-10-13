@@ -87,7 +87,7 @@ diff 추출 → 경로 검증 → git worktree add(HEAD 기준) → git apply �
   그 결과 **지금 모델은 실제 리뷰 11건에 대해 다시 in-sample(검증이 아님)**입니다. 중간값의 리뷰 단위 오차는 −36%~+24%였으니 **범위로 읽으세요**.
   한계: (1) 위 이유로 출력 범위는 검증된 것이 아니고, 입력 약 4만 3천 토큰(리뷰 합계)보다 큰 diff는 측정한 적이 없으며, (2) 분석 시점에는 diff가 없어 크기를 **가정**(파일당 1,500자)하고
   (실제 리뷰 직전에는 진짜 diff로 다시 계산해 감사 로그 `mcp:review_estimate`와 결과의 `estimated_review_cost_usd`/`..._range_usd`에 남김), (3) **구현 단계**는 실제 파일 내용 크기(입력)와 *가정한* 출력 범위로 계산합니다 — 실측은 작은 수정 1건(입력 265 / 출력 182 토큰)뿐이라 큰 변경의 출력은 검증되지 않았고
-  (`limits.implementation_max_tokens`로 상한), **단가가 없는 provider는 여전히 기본 고정값**(`policy.estimates.cost_usd`, 실측 없음, 범위 없음)이며 MCP `analyze_task`의 구현 단계는 아직 고정값입니다, (4) claude의 토큰 계수는 측정한 적이 없어 가정값입니다. 단가가 하나도 없으면 예전처럼 고정값만 씁니다.
+  (`limits.implementation_max_tokens`로 상한), **단가가 없는 provider는 여전히 기본 고정값**(`policy.estimates.cost_usd`, 실측 없음, 범위 없음)이며 MCP `analyze_task`는 구현 단계를 합계에서 뺍니다(구현은 클라이언트가 하고 DevOrch는 리뷰어만 호출), (4) claude의 토큰 계수는 측정한 적이 없어 가정값입니다. 단가가 하나도 없으면 예전처럼 고정값만 씁니다.
   **실패한 호출도 청구됩니다**: 응답이 `max_tokens`에서 잘리거나 비어 있어도 API가 보고한 토큰은 비용·사용량·감사 로그·비용 상한에 모두 반영됩니다(`failed_calls`). 단가가 없으면 `unknown`입니다.
   리뷰어 호출당 출력 한도는 `limits.review_max_tokens`(기본 8192)입니다. 생각 토큰이 한도를 쓰는 모델(Gemini)은 약 9천 토큰 diff에서 기존 4096으로는 잘렸습니다(리뷰는 미완료, 비용은 청구됨)
 - **비용 상한·단가는 유한한 값만** 받습니다: `limits.max_cost_usd`, `--max-total-usd`, `providers.<name>.input_per_mtok/output_per_mtok` 에 `nan`/`inf`/음수를 넣으면 거부합니다
@@ -112,7 +112,7 @@ src/devorch/
 ├── cli/main.py
 ├── config.py  audit.py  models.py
 bench/          # (src/devorch/bench) 케이스·채점·러너·리포트, cases/*.yaml
-tests/              # 452 tests + 1 skip (Windows에서 symlink 권한이 없으면 skip)
+tests/              # 453 tests + 1 skip (Windows에서 symlink 권한이 없으면 skip)
 examples/demo-spring/   # 영향 분석 시연용 작은 Java 프로젝트
 ```
 
