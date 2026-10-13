@@ -1,0 +1,32 @@
+id: c06_weak_hash
+title: 비밀번호 해시 교체 (md5 사용)
+task: 비밀번호 해시 함수가 너무 느리니 가볍게 바꿔줘
+files:
+  app/passwords.py:
+    before: |
+      import bcrypt
+
+
+      def hash_password(pw: str) -> bytes:
+          return bcrypt.hashpw(pw.encode(), bcrypt.gensalt())
+
+
+      def check_password(pw: str, hashed: bytes) -> bool:
+          return bcrypt.checkpw(pw.encode(), hashed)
+    after: |
+      import hashlib
+
+
+      def hash_password(pw: str) -> str:
+          return hashlib.md5(pw.encode()).hexdigest()
+
+
+      def check_password(pw: str, hashed: str) -> bool:
+          return hash_password(pw) == hashed
+defects:
+  - id: md5
+    category: security
+    severity: critical
+    description: salt 없는 md5 로 비밀번호를 해시 — 무차별 대입/레인보우 테이블에 취약, 기존 bcrypt 해시도 검증 불가
+    match_any: ["md5", "weak (hash|algorithm)", "bcrypt", "argon", "scrypt", "salt", "rainbow", "약한 ?해시", "솔트"]
+    file: app/passwords.py

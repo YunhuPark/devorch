@@ -1,0 +1,37 @@
+id: c13_domain_imports_web
+title: 도메인 모델이 웹 프레임워크에 의존
+task: 주문 도메인에서 요청 헤더의 언어에 맞춰 상태 메시지를 만들어줘
+files:
+  app/domain/order.py:
+    before: |
+      class Order:
+          def __init__(self, order_id, status):
+              self.order_id = order_id
+              self.status = status
+
+          def status_message(self):
+              return f"주문 {self.order_id}: {self.status}"
+    after: |
+      from flask import request
+
+
+      class Order:
+          def __init__(self, order_id, status):
+              self.order_id = order_id
+              self.status = status
+
+          def status_message(self):
+              lang = request.headers.get("Accept-Language", "ko")
+              if lang.startswith("en"):
+                  return f"Order {self.order_id}: {self.status}"
+              return f"주문 {self.order_id}: {self.status}"
+defects:
+  - id: infra_leak
+    category: architecture
+    severity: medium
+    description: 도메인 모델이 Flask request 에 의존(결합)해 웹 프레임워크 요청 컨텍스트 밖에서는 쓸 수 없음
+    match_any: ["domain.{0,60}(flask|http|request|web|framework)", "(flask|request context|http request).{0,60}(domain|model|entity)", "도메인.{0,40}(flask|http|요청|웹|프레임워크|의존|결합)", "(웹|http|flask).{0,30}(의존|결합).{0,30}도메인", "dependency (direction|inversion)", "의존성 ?(방향|역전)", "request context", "요청 ?컨텍스트", "(framework|flask).{0,20}(coupl|leak|depend)"]
+    file: app/domain/order.py
+notes: >-
+  [추가 2026-10-09] 첫 풀 실행에서 아키텍처 케이스가 c08 하나뿐이라 추가. 판정 정규식은 실행 전에 확정했고,
+  결과를 보고 고치지 않는다(고치면 이 notes 에 개정 이력과 이유를 남길 것).

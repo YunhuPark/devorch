@@ -1,0 +1,32 @@
+id: c08_layering
+title: 주문 합계 화면 (계층 위반)
+task: 주문 상세 화면에 할인이 적용된 합계를 보여줘
+files:
+  app/views/order_view.py:
+    before: |
+      from app.services.order_service import order_total
+
+
+      def order_detail(request, order_id):
+          return {"order_id": order_id, "total": order_total(order_id)}
+    after: |
+      import sqlite3
+
+
+      def order_detail(request, order_id):
+          conn = sqlite3.connect("shop.db")
+          rows = conn.execute("SELECT price, qty, coupon FROM items WHERE order_id = ?", (order_id,)).fetchall()
+          total = 0
+          for price, qty, coupon in rows:
+              line = price * qty
+              if coupon == "VIP":
+                  line = line * 0.8
+              total += line
+          return {"order_id": order_id, "total": total}
+defects:
+  - id: layering
+    category: architecture
+    severity: medium
+    description: 뷰에서 DB 접근과 할인 비즈니스 로직을 직접 수행해 서비스 계층을 우회함
+    match_any: ["layer", "separation of concerns", "service (layer|class)", "business logic", "(view|controller).{0,40}(database|sql|db)", "계층", "서비스 ?레이어", "비즈니스 ?로직", "관심사"]
+    file: app/views/order_view.py

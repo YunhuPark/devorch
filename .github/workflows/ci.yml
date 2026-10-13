@@ -1,0 +1,77 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: tests (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Git identity (tests create commits)
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name ci
+          git config --global init.defaultBranch main
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev,llm]"
+      - run: python -m pytest -q -p no:cacheprovider
+
+  # A user installs the package, not the source tree: check that the built wheel works from an empty directory
+  # (package data such as the benchmark cases included, no API keys, nothing but `--mock`).
+  clean-install:
+    name: clean install (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build and install the wheel into a fresh venv
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build --wheel --outdir "$RUNNER_TEMP/dist"
+          python -m venv "$RUNNER_TEMP/venv"
+          if [ -d "$RUNNER_TEMP/venv/Scripts" ]; then BIN="$RUNNER_TEMP/venv/Scripts"; else BIN="$RUNNER_TEMP/venv/bin"; fi
+          "$BIN/python" -m pip install "$RUNNER_TEMP"/dist/*.whl
+          echo "BIN=$BIN" >> "$GITHUB_ENV"
+      - name: First-use flow from an empty git repo
+        shell: bash
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name ci
+          mkdir "$RUNNER_TEMP/proj" && cd "$RUNNER_TEMP/proj"
+          git init -q -b main
+          printf 'def add(a, b):\n    return a - b\n' > calc.py
+          printf 'from calc import add\n\ndef test_add():\n    assert add(2, 3) == 5\n' > test_calc.py
+          git add -A && git commit -q -m init
+          "$BIN/python" -m devorch --help
+          "$BIN/python" -m devorch init -p .
+          "$BIN/python" -m devorch analyze "calc.py add 버그 수정" -p .
+          # doctor exits 1 here on purpose (no API keys): it must report that, not crash with a traceback
+          set +e; "$BIN/python" -m devorch doctor -p . > doctor.txt 2>&1; code=$?; set -e
+          cat doctor.txt
+          if grep -q Traceback doctor.txt || [ "$code" -gt 1 ]; then echo "doctor crashed (exit $code)"; exit 1; fi
+          "$BIN/python" -m devorch run "calc.py add 버그 수정" -p . --mock --yes
+          "$BIN/python" -m devorch bench cases

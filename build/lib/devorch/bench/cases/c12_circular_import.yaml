@@ -1,0 +1,47 @@
+id: c12_circular_import
+title: 서비스 간 순환 의존
+task: 주문 서비스를 추가하고, 사용자 서비스에서 사용자별 주문 수를 보여줘
+files:
+  app/services/user_service.py:
+    before: |
+      USERS = {1: "kim", 2: "lee"}
+
+
+      def get_user_name(user_id):
+          return USERS[user_id]
+    after: |
+      from app.services.order_service import count_orders
+
+      USERS = {1: "kim", 2: "lee"}
+
+
+      def get_user_name(user_id):
+          return USERS[user_id]
+
+
+      def user_summary(user_id):
+          return {"name": get_user_name(user_id), "orders": count_orders(user_id)}
+  app/services/order_service.py:
+    before: null
+    after: |
+      from app.services.user_service import get_user_name
+
+      ORDERS = {1: ["a", "b"], 2: ["c"]}
+
+
+      def count_orders(user_id):
+          return len(ORDERS.get(user_id, []))
+
+
+      def order_owner(user_id):
+          return get_user_name(user_id)
+defects:
+  - id: circular_dep
+    category: architecture
+    severity: high
+    description: user_service 와 order_service 가 서로를 import 하는 순환 의존이 생겨, 먼저 로드되는 쪽에서 ImportError 가 남
+    match_any: ["circular", "cyclic", "import cycle", "dependency cycle", "mutual(ly)? (import|depend|referenc)", "순환", "상호 ?(참조|의존|import)", "서로 ?(import|참조|의존)"]
+    file: app/services/order_service.py
+notes: >-
+  [추가 2026-10-09] 첫 풀 실행에서 아키텍처 케이스가 c08 하나뿐이라 추가. 판정 정규식은 실행 전에 확정했고,
+  결과를 보고 고치지 않는다(고치면 이 notes 에 개정 이력과 이유를 남길 것).

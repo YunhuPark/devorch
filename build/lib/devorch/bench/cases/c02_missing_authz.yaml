@@ -1,0 +1,35 @@
+id: c02_missing_authz
+title: 전체 사용자 CSV 내보내기 (권한 검사 누락)
+task: 관리자가 전체 사용자 목록을 CSV로 내보내는 엔드포인트를 추가해줘
+files:
+  app/views.py:
+    before: |
+      from app.auth import require_admin
+      from app.db import list_users
+
+
+      @require_admin
+      def user_list(request):
+          return {"users": list_users()}
+    after: |
+      from app.auth import require_admin
+      from app.db import list_users
+
+
+      @require_admin
+      def user_list(request):
+          return {"users": list_users()}
+
+
+      def export_users(request):
+          rows = ["id,email,phone"]
+          for u in list_users():
+              rows.append(f"{u.id},{u.email},{u.phone}")
+          return "\n".join(rows)
+defects:
+  - id: no_authz
+    category: security
+    severity: high
+    description: export_users 에 require_admin 등 권한 검사가 없어 누구나 전체 사용자 개인정보를 받을 수 있음
+    match_any: ["authori[sz]ation", "access control", "require_admin", "unauthenticated", "(missing|lack|no).{0,30}(auth|permission|check)", "인가", "권한", "인증.{0,10}(없|누락)"]
+    file: app/views.py

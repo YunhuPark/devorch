@@ -1,0 +1,23 @@
+id: c05_double_refund
+title: 환불 처리 추가 (중복 환불)
+task: 주문 환불 처리 함수를 추가해줘
+files:
+  app/refunds.py:
+    before: null
+    after: |
+      from app.db import get_order, save_order
+      from app.gateway import send_refund
+
+
+      def refund_order(order_id: str) -> None:
+          order = get_order(order_id)
+          send_refund(order.payment_id, order.amount)
+          order.status = "refunded"
+          save_order(order)
+defects:
+  - id: no_state_check
+    category: logic
+    severity: high
+    description: 주문 상태/멱등성 검사가 없어 같은 주문을 여러 번 환불하거나 미결제 주문도 환불 가능
+    match_any: ["idempoten", "double.?refund", "refund(ed)? (twice|more than once|multiple)", "already.{0,20}refunded", "status (check|validation)", "멱등", "중복 ?환불", "이미 환불", "상태.{0,10}(검사|확인|검증)"]
+    file: app/refunds.py

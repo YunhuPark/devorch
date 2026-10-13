@@ -255,3 +255,17 @@ def test_run_reports_tokens_per_step_and_the_estimate_next_to_the_actual_cost(tm
     r = CliRunner().invoke(app, ["run", "로그인 JWT 인증 추가", "-p", str(tmp_path), "--mock", "--yes"])
     assert r.exit_code == 0, r.output
     assert "구현 단계" in r.output and "토큰" in r.output and "예상" in r.output
+
+
+def test_output_survives_a_console_encoding_that_cannot_represent_the_text(tmp_path):
+    """Redirected output on a Korean Windows PC is cp949: the CLI must print '?' instead of crashing."""
+    import os
+    import subprocess
+    import sys
+
+    env = {**os.environ, "PYTHONIOENCODING": "cp949", "PYTHONUTF8": "0"}
+    for args in (["doctor", "-p", str(tmp_path)], ["analyze", "결제 로직 변경", "-p", str(tmp_path)]):
+        r = subprocess.run([sys.executable, "-m", "devorch", *args], capture_output=True, env=env, timeout=60)
+        assert b"Traceback" not in r.stderr and b"UnicodeEncodeError" not in r.stderr, r.stderr.decode("utf-8", "replace")[-600:]
+        assert r.returncode in (0, 1)  # doctor may legitimately report failures (exit 1); it must not crash (exit 2/…)
+        assert r.stdout, "no output at all"

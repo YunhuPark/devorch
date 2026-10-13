@@ -33,6 +33,20 @@ from devorch.cli.bench_cmd import bench_app  # noqa: E402
 
 app.add_typer(bench_app, name="bench")
 
+
+@app.callback()
+def _root() -> None:
+    # When stdout/stderr is redirected (`> file`, a pipe, CI, an IDE capture) Python on Windows uses the ANSI code page (cp949 on a
+    # Korean PC), which can't encode characters this CLI prints (e.g. an em dash): a traceback instead of the output. Keep the
+    # encoding but replace what it can't represent — a '?' is better than a crash, most of all in `doctor`.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(errors="replace")
+            except (ValueError, OSError):
+                pass
+
 PathOpt = typer.Option(Path("."), "--path", "-p", help="프로젝트 루트", file_okay=False)
 
 

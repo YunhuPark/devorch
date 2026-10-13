@@ -1,0 +1,35 @@
+id: c15_global_cache
+title: 모듈 전역 가변 캐시
+task: 환율 조회 결과를 캐시해서 반복 호출을 줄여줘
+files:
+  app/rates.py:
+    before: |
+      from app.gateway import external_api_get
+
+
+      def get_rate(currency):
+          return external_api_get(currency)
+    after: |
+      from app.gateway import external_api_get
+
+      _cache = {}
+
+
+      def get_rate(currency):
+          if currency not in _cache:
+              _cache[currency] = external_api_get(currency)
+          return _cache[currency]
+defects:
+  - id: global_state
+    category: architecture
+    severity: medium
+    description: 모듈 전역 가변 캐시(전역 상태)를 모든 요청이 공유해 스레드 안전성과 테스트 격리가 깨짐
+    match_any: ["global", "module-level", "shared (mutable )?state", "thread", "전역", "공유 ?상태", "스레드", "동시성"]
+    file: app/rates.py
+notes: >-
+  [추가 2026-10-09] 첫 풀 실행에서 아키텍처 케이스가 c08 하나뿐이라 추가. 판정 정규식은 실행 전에 확정했고,
+  결과를 보고 고치지 않는다(고치면 이 notes 에 개정 이력과 이유를 남길 것).
+  의도적으로 "만료(TTL)·무효화가 없음" 지적은 매칭에 넣지 않았다(그건 로직/견고성 문제). 그런 지적은 '매칭 안 된 지적'으로 집계된다.
+  [관찰 2026-10-09, 정규식은 수정하지 않음] 첫 실행에서 4개 모드(multi, single, solo:gemini:review, solo:openai:architecture)가 모두
+  "만료(TTL)·갱신 없음"과 "크기 제한 없음"을 지적했고, 전역 상태/스레드 안전성을 지적한 모드는 없었다. 그래서 4개 모두 미탐지다.
+  이 케이스는 모델 간 차이를 가르지 못했으며(전부 동일), 시드한 결함 정의가 리뷰어가 보는 핵심 문제와 달랐다. 모델 비교 근거로 쓰지 말 것.

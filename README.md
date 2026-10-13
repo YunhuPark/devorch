@@ -20,6 +20,9 @@ pip install -e ".[dev,llm]"
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev,llm]"
 ```
+설치가 `No such file or directory: ...\anthropic\types\...` 같은 오류로 실패하면 Windows 경로 길이 제한 때문입니다(2026-10-12 깊은 폴더에서 재현, `C:\dv\venv` 처럼
+짧은 경로의 venv 로는 성공). 짧은 경로에 venv 를 만들거나 [Windows 긴 경로 지원](https://pip.pypa.io/warnings/enable-long-paths)을 켜세요.
+
 그다음 (공통):
 ```
 devorch doctor                                 # 이 컴퓨터에서 막히는 곳을 점검하고 해결 방법을 알려줌 (네트워크·LLM 호출 없음, 키 값은 출력 안 함)
@@ -109,7 +112,7 @@ src/devorch/
 ├── cli/main.py
 ├── config.py  audit.py  models.py
 bench/          # (src/devorch/bench) 케이스·채점·러너·리포트, cases/*.yaml
-tests/              # 451 tests + 1 skip (Windows에서 symlink 권한이 없으면 skip)
+tests/              # 452 tests + 1 skip (Windows에서 symlink 권한이 없으면 skip)
 examples/demo-spring/   # 영향 분석 시연용 작은 Java 프로젝트
 ```
 

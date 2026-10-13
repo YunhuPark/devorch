@@ -1,0 +1,28 @@
+id: c16_clean_layered
+title: 올바르게 계층화된 기능 추가 (대조군)
+task: 상품 상세 화면에 재고 수량을 보여줘
+files:
+  app/services/stock_service.py:
+    before: null
+    after: |
+      STOCK = {"A1": 5, "B2": 0}
+
+
+      def stock_of(product_id):
+          return STOCK.get(product_id, 0)
+  app/views/product_view.py:
+    before: |
+      def product_detail(request, product_id):
+          return {"product_id": product_id}
+    after: |
+      from app.services.stock_service import stock_of
+
+
+      def product_detail(request, product_id):
+          return {"product_id": product_id, "stock": stock_of(product_id)}
+notes: >-
+  [추가 2026-10-09] 아키텍처 리뷰어가 올바른 구조에도 소음을 내는지 보는 대조군. 뷰는 서비스 계층만 호출하고 의존 방향도 맞다.
+  함정(traps)은 정의하지 않았으므로 엄격 오탐으로만 집계된다(정당한 사소한 지적이 섞일 수 있음).
+  [관찰 2026-10-09] 첫 실행에서 GPT 계열 리뷰어 3개 모드가 "재고를 고정된 딕셔너리(STOCK)에서 읽는다"를 MEDIUM 이상으로 지적했다.
+  케이스 코드가 자리표시 데이터(STOCK 딕셔너리)를 쓰는 것을 실제 결함으로 본 것이라, 이 대조군은 완전히 깨끗하다고 할 수 없다
+  (대조군 설계의 한계). Gemini 일반 리뷰는 지적하지 않았다.
