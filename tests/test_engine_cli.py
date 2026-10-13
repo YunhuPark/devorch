@@ -274,3 +274,46 @@ def test_output_survives_a_console_encoding_that_cannot_represent_the_text(tmp_p
         assert b"Traceback" not in r.stderr and b"UnicodeEncodeError" not in r.stderr, r.stderr.decode("utf-8", "replace")[-600:]
         assert r.returncode in (0, 1)  # doctor may legitimately report failures (exit 1); it must not crash (exit 2/…)
         assert r.stdout, "no output at all"
+
+
+# ---- first use: `devorch init` has to say what the user must fill in ------------------------------------------------
+def test_init_writes_a_self_explaining_config_with_empty_price_slots_and_prints_the_next_steps(tmp_path, monkeypatch):
+    import yaml
+
+    from devorch.config import load_config
+    from devorch.providers.factory import build_registry
+
+    secret = "sk-test-0123456789abcdefghijklmnop"
+    monkeypatch.setenv("OPENAI_API_KEY", secret)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    r = CliRunner().invoke(app, ["init", "-p", str(tmp_path)])
+    assert r.exit_code == 0 and "다음 단계" in r.output and "OPENAI_API_KEY: 있음" in r.output and "ANTHROPIC_API_KEY: 없음" in r.output
+    assert secret not in r.output  # presence only, never the value
+    text = (tmp_path / ".devorch" / "config.yaml").read_text(encoding="utf-8")
+    assert text.startswith("# DevOrch 설정") and "추측하지 않습니다" in text
+    cfg = yaml.safe_load(text)
+    for name in ("claude", "openai", "gemini"):
+        assert cfg["providers"][name]["input_per_mtok"] is None and cfg["providers"][name]["output_per_mtok"] is None
+    # empty price slots mean "not given": the provider still works (cost unknown), it is not rejected as an invalid price
+    cfg["providers"]["openai"]["model"] = "some-model"
+    (tmp_path / ".devorch" / "config.yaml").write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    registry, skipped = build_registry(load_config(tmp_path))
+    assert "openai" in registry.names() and "openai" not in skipped
+    assert getattr(registry.get("openai"), "priced", None) is False
+
+
+@pytest.mark.parametrize("name", ["config.yaml", "policy.yaml"])
+@pytest.mark.parametrize("content, expect", [
+    ("providers:\n\topenai: {model: x}\n".encode("utf-8"), "YAML 문법"),       # a tab, the classic hand-edit mistake
+    ("providers: [unclosed\n".encode("utf-8"), "YAML 문법"),
+    ("# 한글 주석\nversion: 1\n".encode("cp949"), "UTF-8"),                    # saved as ANSI by a legacy editor
+    (b"- just\n- a list\n", "mapping"),
+])
+def test_a_broken_hand_edited_file_gives_a_one_line_message_not_a_traceback(tmp_path, name, content, expect):
+    (tmp_path / ".devorch").mkdir()
+    (tmp_path / ".devorch" / name).write_bytes(content)
+    readers = (["doctor"], ["analyze", "버튼 텍스트 변경"]) + ((["providers"],) if name == "config.yaml" else ())  # `providers` never reads policy.yaml
+    for cmd in readers:
+        r = CliRunner().invoke(app, [*cmd, "-p", str(tmp_path)])
+        assert r.exception is None or isinstance(r.exception, SystemExit), (cmd, repr(r.exception))
+        assert expect in r.output and name in r.output, (cmd, r.output[-300:])

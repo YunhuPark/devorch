@@ -13,7 +13,7 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 설치: `python -m venv .venv` → `.venv\Scripts\Activate.ps1` → `pip install -e ".[dev,llm]"` → `pytest`. 막히면 `devorch doctor`.
 
 ## 현재 상태 (2026-10-09, 사실만)
-- **테스트: Windows 네이티브에서 478 passed, 2 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
+- **테스트: Windows 네이티브에서 487 passed, 2 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
   이 PC의 `git.exe` 실행이 간헐적으로 거부됨(WinError 5, 원인 미확정, `git/manager.py` 에 Windows 한정 재시도 완화책).
 - **설치·플랫폼 검증(2026-10-13, "사용자 실사용" 1단계):** 휠을 깨끗한 venv(짧은 경로)에 설치해 키 없이 `init → analyze → doctor → run --mock → bench cases` 가 모두 동작(패키지 데이터 포함, 출력을 파이프로 보낸 cp949 상태에서도).
   찾아 고친 것: 출력이 리다이렉트되면(cp949) `devorch doctor` 가 `—` 때문에 UnicodeEncodeError 로 죽음 → 출력 인코딩 오류를 `?` 로 대체(수정 전 실패 확인한 테스트).
@@ -23,6 +23,8 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
   (2)(3) 테스트 가정 2건(subprocess 출력 인코딩·색, 대소문자 구분 파일시스템에서의 PATHEXT) — 제품 코드 문제 아님. 로컬 Windows 에서는 못 보던 것들이라 CI 가치가 확인됨.
   Linux/macOS 는 이제 **테스트 스위트와 깨끗한 설치 수준에서** 확인됨. 여전히 미검증: Linux/macOS 에서의 실제 `devorch run --apply`/MCP 사용, 실제 Docker, 실제 npm/mvn/gradle.
   WSL(Ubuntu, python 3.14.4)에서의 시도는 `python3-venv`/pip 부재로 중단(sudo 설치가 필요해 사용자 시스템을 건드리지 않음).
+- **첫 사용 안내(2026-10-13):** `devorch init` 이 `model: null` 과 단가 없음만 만들고 아무 안내도 없던 것을 고침 — config.yaml 에 설명 주석, 단가 칸(`input_per_mtok`/`output_per_mtok`: null = 모르는 값, 호출은 되고 비용은 '알 수 없음')을 미리 만들고, 다음 단계와 이 터미널의 키 설정 여부(있음/없음, 값은 절대 출력 안 함)를 출력. 모델명·단가는 여전히 추측하지 않음(공급사 페이지에서 확인해 사용자가 기입). 한계: 대화형 설정 마법사는 아님.
+  손으로 고친 설정 파일이 틀렸을 때(탭 들여쓰기·괄호 누락·ANSI 로 저장·값 오류)도 이제 한 줄 메시지 + 종료코드 2 — 이전엔 YAML 오류/인코딩 오류가 `providers` 등 일부 명령에서 트레이스백으로 샜음. 구현: `ConfigError(ValueError)` + `cli/app.py` 의 `DevorchTyper` 가 모든 명령을 감쌈(Typer 0.27 은 click 을 자체 포함해 `click.ClickException` 상속은 안 먹힘 — 시도했다가 실측으로 확인하고 버림). 가드를 끄면 테스트 4건 실패 확인.
 - **자기 코드로 사용해 보기(dogfood, 2026-10-13):** 이 저장소의 방금 커밋 3개를 `devorch review --level high`(실제 OpenAI+Gemini)로 리뷰, 합계 $0.0978. 결과: usage 명령 READY_WITH_WARNINGS, POSIX 종료 NOT_READY(차단 1), MCP 비용 READY.
   **지적을 하나씩 재현해 판정함:** (a) usage 가 감사 로그의 작업 문구를 이스케이프 없이 출력 — 재현(ESC 2개, BEL 1개가 그대로 나감; MCP 클라이언트가 보낸 문구가 들어올 수 있음) → 제어문자 `?` 치환;
   (b) 값이 잘못된 줄 하나가 보고서 전체를 중단 — 재현(`input_tokens:"abc"`, `cost_usd:"x"` 는 ValueError), 리뷰어가 말하지 않은 것도 발견: NaN/inf/음수 비용이 합계를 `nan`/`inf`/`-4.99` 로 오염 → 모두 "알 수 없음" 처리 + 손상 안내;

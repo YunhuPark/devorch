@@ -10,6 +10,8 @@ from pathlib import Path
 
 import typer
 
+from devorch.cli.app import DevorchTyper
+
 from devorch.bench.cases import load_cases, validate_cases
 from devorch.bench.judge import count_judge_calls, judge_results, outcome_to_json, render_judged_report
 from devorch.bench.mock import heuristic_provider
@@ -21,7 +23,7 @@ from devorch.core.orchestrator.review import budget_preflight
 from devorch.providers.base import ProviderRegistry
 from devorch.providers.factory import build_registry
 
-bench_app = typer.Typer(help="시드 결함 벤치마크 (리뷰어가 심어둔 결함을 찾는지 측정)", no_args_is_help=True)
+bench_app = DevorchTyper(help="시드 결함 벤치마크 (리뷰어가 심어둔 결함을 찾는지 측정)", no_args_is_help=True)
 
 
 def _finite_positive(value: float | None) -> float | None:

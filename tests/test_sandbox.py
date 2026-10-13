@@ -149,7 +149,7 @@ def test_cli_sandbox_status(tmp_path, shim, monkeypatch):
     runner.invoke(app, ["init", "-p", str(tmp_path)])
     assert "mode = none" in runner.invoke(app, ["sandbox", "-p", str(tmp_path)]).output
     cfgp = tmp_path / ".devorch" / "config.yaml"
-    cfgp.write_text(cfgp.read_text().replace("project:", "project:\n  sandbox: {mode: docker, image: myimg:1}", 1))
+    cfgp.write_text(cfgp.read_text(encoding="utf-8").replace("project:", "project:\n  sandbox: {mode: docker, image: myimg:1}", 1), encoding="utf-8")
     r = runner.invoke(app, ["sandbox", "-p", str(tmp_path)])
     assert r.exit_code == 0 and "OK" in r.output
     monkeypatch.setenv("SHIM_NO_IMAGE", "1")

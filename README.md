@@ -26,7 +26,7 @@ pip install -e ".[dev,llm]"
 그다음 (공통):
 ```
 devorch doctor                                 # 이 컴퓨터에서 막히는 곳을 점검하고 해결 방법을 알려줌 (네트워크·LLM 호출 없음, 키 값은 출력 안 함)
-devorch init                                   # .devorch/config.yaml, policy.yaml 생성
+devorch init                                   # .devorch/config.yaml, policy.yaml 생성 + 채워야 할 항목(model, 단가)과 다음 단계를 안내
 devorch usage                                  # 감사 로그에서 작업별·provider별·날짜별 실제 지출 집계 (--days 7, --json). 단가 없는 호출은 $0이 아니라 '알 수 없음'으로 표시
 devorch analyze "로그인 기능에 JWT 인증 추가해줘"   # LLM 호출 없이 위험도/영향/라우팅/예상 비용 출력
 devorch run "로그인 JWT 인증 추가" --mock         # 가짜 Provider로 전체 워크플로 시연
@@ -113,7 +113,7 @@ src/devorch/
 ├── cli/main.py
 ├── config.py  audit.py  models.py
 bench/          # (src/devorch/bench) 케이스·채점·러너·리포트, cases/*.yaml
-tests/              # 478 tests + 2 skip (Windows에서 symlink 권한이 없으면 skip)
+tests/              # 487 tests + 2 skip (Windows에서 symlink 권한이 없으면 skip)
 examples/demo-spring/   # 영향 분석 시연용 작은 Java 프로젝트
 ```
 

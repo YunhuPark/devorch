@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
 import typer
+
+from devorch.cli.app import DevorchTyper
 
 from devorch.audit import AuditLogger
 from devorch.config import devorch_dir, init_project, load_config, load_policy
@@ -27,7 +30,7 @@ from devorch.providers.mock import MockProvider
 from devorch.service import ControlPlane
 from devorch.store import Approval, StoreError
 
-app = typer.Typer(help="DevOrch — AI Development Control Plane", no_args_is_help=True, add_completion=False)
+app = DevorchTyper(help="DevOrch — AI Development Control Plane", no_args_is_help=True, add_completion=False)
 
 from devorch.cli.bench_cmd import bench_app  # noqa: E402
 
@@ -73,6 +76,16 @@ def init(path: Path = PathOpt, force: bool = typer.Option(False, "--force", help
     typer.echo("생성됨:")
     for p in created:
         typer.echo(f"  {p}")
+    cfg = load_config(path)
+    envs = [(n, c.get("api_key_env")) for n, c in (cfg.get("providers") or {}).items()]
+    typer.echo("\n다음 단계:")
+    typer.echo(f"  1) {devorch_dir(path) / 'config.yaml'} 에서 쓸 provider 의 model, input_per_mtok, output_per_mtok 를 채우세요.")
+    typer.echo("     (단가를 비워 두면 비용이 '알 수 없음'으로 표시되고 비용 상한을 쓸 수 없습니다. 모델명·단가는 추측하지 않으니 공급사 페이지에서 확인하세요.)")
+    typer.echo("  2) API 키는 환경변수로만 넣으세요. 이 터미널 기준 현재 상태:")
+    for name, env in envs:
+        typer.echo(f"       {name:<8} {env}: {'있음' if env and os.environ.get(env) else '없음'}")
+    typer.echo("     PowerShell 예: $env:OPENAI_API_KEY = (Get-Clipboard -Raw).Trim()   (키를 복사한 뒤. Ctrl+V 로 입력창에 붙여넣지 마세요)")
+    typer.echo("  3) devorch doctor  →  devorch analyze \"작업 설명\"  →  devorch review --git-range HEAD~1..HEAD --task \"작업 설명\"")
 
 
 @app.command()
