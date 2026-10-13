@@ -21,6 +21,8 @@ from devorch.core.execution.winjob import Job
 from devorch.security.command_policy import check_command, split_command
 
 OUTPUT_TAIL_CHARS = 4000
+_POSIX_KILL_ROUNDS = 5
+_POSIX_KILL_GAP_S = 0.05
 _SENSITIVE_ENV = re.compile(r"(?i)(api[_-]?key|secret|token|password|passwd|credential|authorization)")
 
 
@@ -128,10 +130,16 @@ async def _kill_tree(proc: asyncio.subprocess.Process, job: Job | None = None) -
         except ProcessLookupError:
             pass
         return
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
+    # One killpg can miss a process that is mid-fork at that instant (seen on macOS CI with a test that keeps forking), so send it a
+    # few times. The group leader is not reaped yet (the caller waits after this returns), so its pid — the group id — can't be
+    # reused by an unrelated process while we repeat.
+    for attempt in range(_POSIX_KILL_ROUNDS):
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            return
+        if attempt < _POSIX_KILL_ROUNDS - 1:
+            await asyncio.sleep(_POSIX_KILL_GAP_S)
 
 
 async def run_tests(
