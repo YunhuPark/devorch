@@ -28,6 +28,7 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 - **타임아웃 프로세스 트리 종료(2026-10-12 수정):** `taskkill /T` 는 프로세스 트리의 스냅샷을 따라 걷기 때문에, 종료 도중 새로 만들어진 자식이 살아남았다
   (계속 fork 하는 테스트로 재현: 타임아웃 뒤 자식 6개 생존, 3/3 실패). `core/execution/winjob.py`(Windows Job Object, ctypes, KILL_ON_JOB_CLOSE)로 바꾸고
   taskkill 은 대체 수단으로 남김. 수정 뒤 같은 시험 3/3 통과. 간헐 실패하던 `test_timeout_kills_child_processes_too` 도 이 경합이 원인으로 **추정**(전체 실행 1회 실패 관측, 단독 4/4 통과였음).
+  **POSIX 쪽(2026-10-13, CI가 찾음):** 같은 fork 시험이 macOS(py3.12)에서 자식 1개 생존으로 확률적으로 실패(py3.11·Linux 는 통과) — `killpg` 한 번은 fork 중인 프로세스를 놓칠 수 있음. 그룹 리더가 reap 되기 전(pid 재사용 불가)에 50ms 간격으로 5회 재전송하도록 수정. 수정 뒤 CI 4회 연속 통과(같은 커밋 재실행, 매번 3분 실제 실행). 확률적 문제라 4회로 "고쳐졌다"고 단정하진 않음.
   한계: 프로세스 생성 직후~job 편입 직전의 아주 짧은 구간에 자식이 생기면 job 밖일 수 있음(미검증). 테스트가 남긴 백그라운드 프로세스는 이제 테스트 종료 때 같이 종료됨(job 닫힘).
 - 구현됨: Task Analyzer / Risk Engine / Impact Analyzer / Model Router + policy.yaml / Evaluator(fail-closed) / 상태 머신 / Provider 어댑터
   (Anthropic, OpenAI, Gemini) / 실행기(git worktree) / MCP 서버 / Docker 샌드박스 / Benchmark(+LLM 판정기, solo 모드, 결함 단위 통계) / Dashboard /
