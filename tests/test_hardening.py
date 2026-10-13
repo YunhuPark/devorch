@@ -82,9 +82,11 @@ def test_resolve_executable_finds_cmd_and_bat_launchers_by_pathext_but_never_sea
 
 
 def test_a_relative_launcher_such_as_gradlew_resolves_inside_the_project_only(tmp_path):
-    (tmp_path / "gradlew.bat").write_text("@echo off\n", encoding="utf-8")
+    # Named like PATHEXT writes it: the Windows search is exercised here on case-sensitive file systems too (Linux CI), where
+    # `gradlew.BAT` would not find `gradlew.bat`; on Windows/macOS either name works.
+    (tmp_path / "gradlew.BAT").write_text("@echo off\n", encoding="utf-8")
     env = {"PATH": "", "PATHEXT": ".EXE;.BAT"}
-    assert resolve_executable("./gradlew", tmp_path, env, windows=True) == str(tmp_path / "gradlew.bat")
+    assert os.path.samefile(resolve_executable("./gradlew", tmp_path, env, windows=True), tmp_path / "gradlew.BAT")
     assert resolve_executable("../gradlew", tmp_path, env, windows=True) is None  # no escaping the work dir
 
 

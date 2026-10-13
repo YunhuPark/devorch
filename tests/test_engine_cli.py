@@ -192,12 +192,17 @@ def test_cli_run_mock_with_approval(tmp_path):
 
 
 def test_python_dash_m_devorch_runs_the_same_cli(tmp_path):
+    import os
     import subprocess
     import sys
 
-    r = subprocess.run([sys.executable, "-m", "devorch", "bench", "run", "--help"], capture_output=True, text=True, encoding="utf-8", cwd=tmp_path)
+    # The child writes to a pipe: pin its encoding (else the ANSI code page) and turn colors off (rich splits styled text on CI).
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "NO_COLOR": "1", "TERM": "dumb"}
+    env.pop("FORCE_COLOR", None)
+    kw = dict(capture_output=True, text=True, encoding="utf-8", cwd=tmp_path, env=env)
+    r = subprocess.run([sys.executable, "-m", "devorch", "bench", "run", "--help"], **kw)
     assert r.returncode == 0 and "--max-total-usd" in r.stdout
-    r = subprocess.run([sys.executable, "-m", "devorch", "providers", "-p", str(tmp_path)], capture_output=True, text=True, encoding="utf-8", cwd=tmp_path)
+    r = subprocess.run([sys.executable, "-m", "devorch", "providers", "-p", str(tmp_path)], **kw)
     assert r.returncode == 0 and "claude" in r.stdout
 
 
@@ -264,7 +269,7 @@ def test_output_survives_a_console_encoding_that_cannot_represent_the_text(tmp_p
     import sys
 
     env = {**os.environ, "PYTHONIOENCODING": "cp949", "PYTHONUTF8": "0"}
-    for args in (["doctor", "-p", str(tmp_path)], ["analyze", "결제 로직 변경", "-p", str(tmp_path)]):
+    for args in (["--help"], ["doctor", "-p", str(tmp_path)], ["analyze", "결제 로직 변경", "-p", str(tmp_path)]):
         r = subprocess.run([sys.executable, "-m", "devorch", *args], capture_output=True, env=env, timeout=60)
         assert b"Traceback" not in r.stderr and b"UnicodeEncodeError" not in r.stderr, r.stderr.decode("utf-8", "replace")[-600:]
         assert r.returncode in (0, 1)  # doctor may legitimately report failures (exit 1); it must not crash (exit 2/…)
