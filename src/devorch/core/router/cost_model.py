@@ -8,16 +8,19 @@ fitted on (per-case -5..+10%, total +2..+3%) and on 4 real 6-36KB diffs includin
 v1 single-rate formula was off by -35% on that one).
 
 OUTPUT tokens (what the model writes, thinking included) are the uncertain part: they grow with the prompt and vary a lot
-(OpenAI 27..2702, Gemini 249..5770 on real diffs). So the estimate is a range (low / mid / high), each an affine function of the
+(OpenAI 27..2702, Gemini 249..5770 on real diffs; a tiny 1.4 KB diff still took Gemini 5196). So the estimate is a range (low / mid / high), each an affine function of the
 input size.
 
 History of the output model (so it can't be mistaken for a validated one):
 - v2 (2026-10-11 morning): set from 9 observations (benchmark mean + 4 real reviews). Then tested on 7 NEW reviews (14 calls):
   inputs within -2..+6% on all 14; outputs inside the range on 12/14 (two heavy-finding reviews above the high bound); total cost
   inside the range on 6/7 reviews; mid bias +8% (openai) and -17% (gemini).
-- v3 (now): high bounds widened and the gemini mid slope raised using those 7 reviews. The model is therefore IN-SAMPLE again on 11
+- v3: high bounds widened and the gemini mid slope raised using those 7 reviews. The model is therefore IN-SAMPLE again on 11
   real reviews + the benchmark: it documents coverage, it is NOT a validation. Test it on fresh reviews before trusting it, add
   every new measurement to tests/test_cost_model.py, and widen (never narrow) on a miss.
+- v4 (2026-10-13): tested on 3 NEW reviews (6 calls): inputs -2..+8% (the +8.4% on one gemini call is an over-estimate), openai outputs
+  all inside, gemini outputs 2/3 inside; a 1.4 KB diff made gemini think for 5,196 tokens (the old high bound for that prompt was ~2,800)
+  so review cost was 1 of 3 outside the range. Gemini's high base raised 2500 -> 5500. The model is IN-SAMPLE again on 14 reviews.
 
 Not covered: the implementation step (never measured), claude (flagged assumption), diffs larger than ~12k tokens, other models.
 At analysis time the diff does not exist yet, so its size is an assumption (``assumed_prompt_counts``).
@@ -38,7 +41,7 @@ ASSUMED_ASCII_CHARS_PER_TOKEN = 3.0  # providers never measured (claude)
 # output tokens = base + slope * input_tokens, for (low, mid, high); low is a flat floor (an answer of "[]" plus a little thinking)
 OUTPUT_MODEL: dict[str, dict[str, tuple[float, float]]] = {
     "openai": {"low": (25, 0.0), "mid": (300, 0.10), "high": (1200, 0.25)},
-    "gemini": {"low": (200, 0.0), "mid": (900, 0.35), "high": (2500, 0.50)},
+    "gemini": {"low": (200, 0.0), "mid": (900, 0.35), "high": (5500, 0.50)},  # v4: 2500 -> 5500 after a 1.4 KB diff made it think for 5.2k tokens
 }
 ASSUMED_OUTPUT_MODEL = {"low": (25, 0.0), "mid": (500, 0.10), "high": (1500, 0.30)}  # unmeasured providers
 CONTEXT_OVERHEAD_CHARS = 300  # task/risk/file-list header and section labels around the diff in a review prompt

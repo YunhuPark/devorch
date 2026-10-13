@@ -13,7 +13,7 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 설치: `python -m venv .venv` → `.venv\Scripts\Activate.ps1` → `pip install -e ".[dev,llm]"` → `pytest`. 막히면 `devorch doctor`.
 
 ## 현재 상태 (2026-10-09, 사실만)
-- **테스트: Windows 네이티브에서 462 passed, 1 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
+- **테스트: Windows 네이티브에서 478 passed, 2 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
   이 PC의 `git.exe` 실행이 간헐적으로 거부됨(WinError 5, 원인 미확정, `git/manager.py` 에 Windows 한정 재시도 완화책).
 - **설치·플랫폼 검증(2026-10-13, "사용자 실사용" 1단계):** 휠을 깨끗한 venv(짧은 경로)에 설치해 키 없이 `init → analyze → doctor → run --mock → bench cases` 가 모두 동작(패키지 데이터 포함, 출력을 파이프로 보낸 cp949 상태에서도).
   찾아 고친 것: 출력이 리다이렉트되면(cp949) `devorch doctor` 가 `—` 때문에 UnicodeEncodeError 로 죽음 → 출력 인코딩 오류를 `?` 로 대체(수정 전 실패 확인한 테스트).
@@ -23,6 +23,15 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
   (2)(3) 테스트 가정 2건(subprocess 출력 인코딩·색, 대소문자 구분 파일시스템에서의 PATHEXT) — 제품 코드 문제 아님. 로컬 Windows 에서는 못 보던 것들이라 CI 가치가 확인됨.
   Linux/macOS 는 이제 **테스트 스위트와 깨끗한 설치 수준에서** 확인됨. 여전히 미검증: Linux/macOS 에서의 실제 `devorch run --apply`/MCP 사용, 실제 Docker, 실제 npm/mvn/gradle.
   WSL(Ubuntu, python 3.14.4)에서의 시도는 `python3-venv`/pip 부재로 중단(sudo 설치가 필요해 사용자 시스템을 건드리지 않음).
+- **자기 코드로 사용해 보기(dogfood, 2026-10-13):** 이 저장소의 방금 커밋 3개를 `devorch review --level high`(실제 OpenAI+Gemini)로 리뷰, 합계 $0.0978. 결과: usage 명령 READY_WITH_WARNINGS, POSIX 종료 NOT_READY(차단 1), MCP 비용 READY.
+  **지적을 하나씩 재현해 판정함:** (a) usage 가 감사 로그의 작업 문구를 이스케이프 없이 출력 — 재현(ESC 2개, BEL 1개가 그대로 나감; MCP 클라이언트가 보낸 문구가 들어올 수 있음) → 제어문자 `?` 치환;
+  (b) 값이 잘못된 줄 하나가 보고서 전체를 중단 — 재현(`input_tokens:"abc"`, `cost_usd:"x"` 는 ValueError), 리뷰어가 말하지 않은 것도 발견: NaN/inf/음수 비용이 합계를 `nan`/`inf`/`-4.99` 로 오염 → 모두 "알 수 없음" 처리 + 손상 안내;
+  (c) 단가 없는 호출만 있는 날이 `$0.0000` 으로 표시 — 재현 → "(+ 비용 모르는 호출 N건)" 표시. 새 테스트 10개는 수정 전 코드에서 실패함을 확인.
+  **차단 지적(POSIX killpg 반복이 무관한 프로세스 그룹을 죽일 수 있음): 부분적으로 맞음.** 내 주석의 근거("리더가 아직 reap 되지 않아 pid 재사용 불가")가 틀렸음 — Linux 에서 asyncio 가 kill 직후 리더를 스스로 reap 함(실측).
+  다만 첫 "그룹 없음"에서 멈추고(실측: 호출 2번, 11ms), 위험은 정확히 같은 pid 가 ms 안에 재할당되어 그룹 리더가 되는 경우뿐(pid 는 순환 할당이라 거의 불가능, macOS 는 미측정). 창을 5회×50ms → 3회×10ms 로 줄이고 주석을 사실대로 고침. **airtight 아님**(남은 위험은 이론상).
+  "항상 sleep 전체를 기다린다"는 Gemini 지적은 틀림(실측 11ms). "취소 시 정리가 끊길 수 있음"은 맞지만 최초 killpg 는 이미 나간 뒤라 영향이 작아 고치지 않음.
+  **비용 예측 hold-out(처음으로 작은 diff 포함):** 입력 추정 오차 −2~+8%(과대추정 쪽), OpenAI 출력은 전부 범위 안, Gemini 출력은 1.4KB 짜리 diff 에서 생각 토큰 5,196(예상 상한 약 2,800) → 리뷰 비용 3건 중 1건 범위 밖(누적 hold-out 8/10).
+  규칙대로 범위를 넓힘(Gemini high 기본값 2500→5500, v4) — 다시 in-sample. 작은 diff 라고 싼 게 아니다(Gemini 생각 토큰은 diff 크기와 약하게만 관련).
 - **`devorch usage`(2026-10-13):** 감사 로그에서 작업별·provider별·날짜별 실제 지출과 리뷰 예상 범위 적중률을 집계(LLM 호출 없음, mock 제외, 단가 없는 호출은 "알 수 없음"으로 따로 표시하고 합계에 0으로 넣지 않음 — 변조 시험으로 확인).
   실제 playground 로그에서 $0.0121 실행을 정확히 집계. 한계: DevOrch 가 직접 호출한 LLM 만 보임(MCP 흐름에서 클라이언트 에이전트의 구현 비용은 안 보임). 2주 사용 기록용.
 - **타임아웃 프로세스 트리 종료(2026-10-12 수정):** `taskkill /T` 는 프로세스 트리의 스냅샷을 따라 걷기 때문에, 종료 도중 새로 만들어진 자식이 살아남았다

@@ -332,3 +332,32 @@ def test_cli_saves_the_proposed_diff_byte_exact_without_converting_line_endings(
     saved = next((repo / ".devorch" / "runs").glob("*.diff")).read_bytes()
     assert b"\r" not in saved and saved.startswith(b"diff --git")
     git(repo, "apply", "--check", str(next((repo / ".devorch" / "runs").glob("*.diff"))))  # applies as saved
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+async def test_posix_kill_stops_at_the_first_empty_group_and_stays_within_a_few_milliseconds():
+    """Found by an AI review: repeating killpg must stop when the group is gone (pid reuse) and must not add a long delay."""
+    import os
+    import time
+
+    from devorch.core.execution import test_runner as tr
+
+    calls = []
+    real = os.killpg
+
+    def spy(pg, sig):
+        calls.append(pg)
+        return real(pg, sig)
+
+    proc = await asyncio.create_subprocess_exec("sleep", "30", start_new_session=True)
+    os.killpg = spy
+    try:
+        t0 = time.monotonic()
+        await tr._kill_tree(proc)
+        elapsed = time.monotonic() - t0
+    finally:
+        os.killpg = real
+    await proc.wait()
+    assert 1 <= len(calls) <= tr._POSIX_KILL_ROUNDS
+    assert len(calls) < tr._POSIX_KILL_ROUNDS or elapsed < 0.5
+    assert elapsed < 0.2, f"kill took {elapsed*1000:.0f} ms"

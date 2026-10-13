@@ -94,3 +94,32 @@ def test_cli_usage_reads_the_project_audit_log(tmp_path):
     assert js["total_cost_usd"] == pytest.approx(0.0123)
     empty = CliRunner().invoke(app, ["usage", "-p", str(tmp_path / "other")])
     assert empty.exit_code == 0 and "기록된 LLM 호출이 없습니다" in empty.output
+
+
+# ---- found by the AI reviewers on this command's own commit (2026-10-13), each reproduced before fixing -----------------
+def test_control_characters_in_logged_text_never_reach_the_terminal():
+    s = summarize([ev("t1", "mcp:analyze_task", {"task": "fix\x1b[2J\x1b]0;PWNED\x07 bug", "risk": "hi\x1bgh"}), call("t1", "review", "open\x1bai", 0.01)], now=NOW)
+    out = render(s)
+    assert "\x1b" not in out and "\x07" not in out and "fix" in out
+
+
+@pytest.mark.parametrize("bad", [{"input_tokens": "abc"}, {"output_tokens": None, "input_tokens": -3}, {"cost_usd": "x"}, {"cost_usd": float("nan")},
+                                 {"cost_usd": float("inf")}, {"cost_usd": -5.0}, {"cost_usd": True}])
+def test_one_line_with_a_bad_value_neither_aborts_the_report_nor_corrupts_the_total(bad):
+    s = summarize([call("t1", "review", "openai", 0.01), call("t2", "review", "openai", 0.02, **bad)], now=NOW)
+    assert s["total_cost_usd"] in (pytest.approx(0.03), pytest.approx(0.01))  # a bad cost is unknown (left out), never nan/inf/negative
+    assert 0 <= s["total_cost_usd"] < float("inf") and s["total_cost_usd"] == s["total_cost_usd"]
+    assert s["malformed_values"] >= 1 or "input_tokens" not in bad and "output_tokens" not in bad
+    render(s)  # must not raise
+
+
+def test_a_bad_cost_counts_as_unknown_and_is_reported_as_possible_log_damage():
+    s = summarize([call("t1", "review", "openai", float("nan"))], now=NOW)
+    assert s["unknown_calls"] == 1 and s["malformed_values"] == 1
+    assert "손상" in render(s)
+
+
+def test_a_day_with_only_unpriced_calls_is_not_shown_as_a_plain_zero_dollars():
+    s = summarize([call("t1", "review", "openai", None)], now=NOW)
+    assert sum(s["by_day_unknown_calls"].values()) == 1
+    assert "비용 모르는 호출 1건" in next(line for line in render(s).splitlines() if line.startswith("날짜별"))

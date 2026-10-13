@@ -21,8 +21,8 @@ from devorch.core.execution.winjob import Job
 from devorch.security.command_policy import check_command, split_command
 
 OUTPUT_TAIL_CHARS = 4000
-_POSIX_KILL_ROUNDS = 5
-_POSIX_KILL_GAP_S = 0.05
+_POSIX_KILL_ROUNDS = 3
+_POSIX_KILL_GAP_S = 0.01
 _SENSITIVE_ENV = re.compile(r"(?i)(api[_-]?key|secret|token|password|passwd|credential|authorization)")
 
 
@@ -130,9 +130,11 @@ async def _kill_tree(proc: asyncio.subprocess.Process, job: Job | None = None) -
         except ProcessLookupError:
             pass
         return
-    # One killpg can miss a process that is mid-fork at that instant (seen on macOS CI with a test that keeps forking), so send it a
-    # few times. The group leader is not reaped yet (the caller waits after this returns), so its pid — the group id — can't be
-    # reused by an unrelated process while we repeat.
+    # One killpg can miss a process that is mid-fork at that instant (seen on macOS CI with a test that keeps forking), so send it again
+    # shortly after. NOT airtight: asyncio reaps the leader right after the kill (measured on Linux), so once the group is empty its id
+    # is free. We stop at the first "no such group" and keep the window tiny (<= ~20 ms) because the only thing a repeat could hit
+    # wrongly is an unrelated process that was handed exactly this pid and became a group leader within those milliseconds — pids are
+    # allocated cyclically, so that needs the whole pid space to wrap in that time (not seen, not measured on macOS).
     for attempt in range(_POSIX_KILL_ROUNDS):
         try:
             os.killpg(proc.pid, signal.SIGKILL)
