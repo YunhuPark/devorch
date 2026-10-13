@@ -413,6 +413,20 @@ def tasks(path: Path = PathOpt) -> None:
         typer.echo(f"{tid}  {str(s['risk']).upper():<8} review={g['evaluation'] or '-':<20} tests={g['tests']:<12} approval={g['approval']:<12} {s['task'][:40]}")
 
 
+@app.command()
+def usage(
+    path: Path = PathOpt,
+    days: float = typer.Option(None, "--days", min=0.0, help="최근 N일만 집계 (생략하면 전체)"),
+    include_mock: bool = typer.Option(False, "--include-mock", help="--mock 호출도 포함"),
+    as_json: bool = typer.Option(False, "--json", help="JSON으로 출력"),
+) -> None:
+    """감사 로그(.devorch/audit.jsonl)에서 작업별·provider별·날짜별 실제 지출을 집계한다 (LLM 호출 없음)."""
+    from devorch.usage import load_events, render, summarize
+
+    summary = summarize(load_events(devorch_dir(path) / "audit.jsonl"), days=days, include_mock=include_mock)
+    typer.echo(json.dumps(summary, ensure_ascii=False, indent=2, default=str) if as_json else render(summary))
+
+
 def _fmt_usd(x: float | None) -> str:
     return "알 수 없음(단가 없음)" if x is None else f"${x:.4f}"
 

@@ -13,7 +13,7 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 설치: `python -m venv .venv` → `.venv\Scripts\Activate.ps1` → `pip install -e ".[dev,llm]"` → `pytest`. 막히면 `devorch doctor`.
 
 ## 현재 상태 (2026-10-09, 사실만)
-- **테스트: Windows 네이티브에서 453 passed, 1 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
+- **테스트: Windows 네이티브에서 462 passed, 1 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
   이 PC의 `git.exe` 실행이 간헐적으로 거부됨(WinError 5, 원인 미확정, `git/manager.py` 에 Windows 한정 재시도 완화책).
 - **설치·플랫폼 검증(2026-10-13, "사용자 실사용" 1단계):** 휠을 깨끗한 venv(짧은 경로)에 설치해 키 없이 `init → analyze → doctor → run --mock → bench cases` 가 모두 동작(패키지 데이터 포함, 출력을 파이프로 보낸 cp949 상태에서도).
   찾아 고친 것: 출력이 리다이렉트되면(cp949) `devorch doctor` 가 `—` 때문에 UnicodeEncodeError 로 죽음 → 출력 인코딩 오류를 `?` 로 대체(수정 전 실패 확인한 테스트).
@@ -23,6 +23,8 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
   (2)(3) 테스트 가정 2건(subprocess 출력 인코딩·색, 대소문자 구분 파일시스템에서의 PATHEXT) — 제품 코드 문제 아님. 로컬 Windows 에서는 못 보던 것들이라 CI 가치가 확인됨.
   Linux/macOS 는 이제 **테스트 스위트와 깨끗한 설치 수준에서** 확인됨. 여전히 미검증: Linux/macOS 에서의 실제 `devorch run --apply`/MCP 사용, 실제 Docker, 실제 npm/mvn/gradle.
   WSL(Ubuntu, python 3.14.4)에서의 시도는 `python3-venv`/pip 부재로 중단(sudo 설치가 필요해 사용자 시스템을 건드리지 않음).
+- **`devorch usage`(2026-10-13):** 감사 로그에서 작업별·provider별·날짜별 실제 지출과 리뷰 예상 범위 적중률을 집계(LLM 호출 없음, mock 제외, 단가 없는 호출은 "알 수 없음"으로 따로 표시하고 합계에 0으로 넣지 않음 — 변조 시험으로 확인).
+  실제 playground 로그에서 $0.0121 실행을 정확히 집계. 한계: DevOrch 가 직접 호출한 LLM 만 보임(MCP 흐름에서 클라이언트 에이전트의 구현 비용은 안 보임). 2주 사용 기록용.
 - **타임아웃 프로세스 트리 종료(2026-10-12 수정):** `taskkill /T` 는 프로세스 트리의 스냅샷을 따라 걷기 때문에, 종료 도중 새로 만들어진 자식이 살아남았다
   (계속 fork 하는 테스트로 재현: 타임아웃 뒤 자식 6개 생존, 3/3 실패). `core/execution/winjob.py`(Windows Job Object, ctypes, KILL_ON_JOB_CLOSE)로 바꾸고
   taskkill 은 대체 수단으로 남김. 수정 뒤 같은 시험 3/3 통과. 간헐 실패하던 `test_timeout_kills_child_processes_too` 도 이 경합이 원인으로 **추정**(전체 실행 1회 실패 관측, 단독 4/4 통과였음).
