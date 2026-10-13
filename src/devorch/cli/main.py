@@ -526,6 +526,8 @@ def review(
         typer.echo(json.dumps({**res, "preview": prev}, ensure_ascii=False, indent=2, default=str))
     else:
         typer.echo(f"\n결과: {res['status']}")
+        if res.get("caveat"):
+            typer.echo(f"  ※ {res['caveat']}")
         for f in res["blocking"]:
             typer.echo(f"  [BLOCKING {f['severity'].upper()}] ({f['source']}) {f['title']}" + (f"  — {f['file']}" if f.get("file") else ""))
         for f in res["warnings"]:

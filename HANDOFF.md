@@ -13,7 +13,7 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 설치: `python -m venv .venv` → `.venv\Scripts\Activate.ps1` → `pip install -e ".[dev,llm]"` → `pytest`. 막히면 `devorch doctor`.
 
 ## 현재 상태 (2026-10-09, 사실만)
-- **테스트: Windows 네이티브에서 487 passed, 2 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
+- **테스트: Windows 네이티브에서 488 passed, 2 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
   이 PC의 `git.exe` 실행이 간헐적으로 거부됨(WinError 5, 원인 미확정, `git/manager.py` 에 Windows 한정 재시도 완화책).
 - **설치·플랫폼 검증(2026-10-13, "사용자 실사용" 1단계):** 휠을 깨끗한 venv(짧은 경로)에 설치해 키 없이 `init → analyze → doctor → run --mock → bench cases` 가 모두 동작(패키지 데이터 포함, 출력을 파이프로 보낸 cp949 상태에서도).
   찾아 고친 것: 출력이 리다이렉트되면(cp949) `devorch doctor` 가 `—` 때문에 UnicodeEncodeError 로 죽음 → 출력 인코딩 오류를 `?` 로 대체(수정 전 실패 확인한 테스트).
@@ -23,6 +23,8 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
   (2)(3) 테스트 가정 2건(subprocess 출력 인코딩·색, 대소문자 구분 파일시스템에서의 PATHEXT) — 제품 코드 문제 아님. 로컬 Windows 에서는 못 보던 것들이라 CI 가치가 확인됨.
   Linux/macOS 는 이제 **테스트 스위트와 깨끗한 설치 수준에서** 확인됨. 여전히 미검증: Linux/macOS 에서의 실제 `devorch run --apply`/MCP 사용, 실제 Docker, 실제 npm/mvn/gradle.
   WSL(Ubuntu, python 3.14.4)에서의 시도는 `python3-venv`/pip 부재로 중단(sudo 설치가 필요해 사용자 시스템을 건드리지 않음).
+- **READY 문구(2026-10-13):** 리뷰 결과 `READY`/`READY_WITH_WARNINGS` 에 "안전 보증이 아닙니다 — AI 리뷰어의 실제 버그 탐지율은 검증되지 않았음" 문구를 CLI 출력과 MCP 결과(`caveat`)에 항상 붙임(없었음). 차단 결과에는 붙이지 않음.
+- **방향(사용자 판단, 2026-10-13):** 현업에서는 "잘못된 코드가 그대로 반영되는 것"이 가장 중요하다고 봄 → 통제 중심 포지셔닝. 그러면 가장 약한 증거(실제 코드에서의 탐지율·오탐)가 핵심 약점. 설계: `docs/EVAL_DESIGN.md` (사전 등록, 아직 실행 안 함).
 - **첫 사용 안내(2026-10-13):** `devorch init` 이 `model: null` 과 단가 없음만 만들고 아무 안내도 없던 것을 고침 — config.yaml 에 설명 주석, 단가 칸(`input_per_mtok`/`output_per_mtok`: null = 모르는 값, 호출은 되고 비용은 '알 수 없음')을 미리 만들고, 다음 단계와 이 터미널의 키 설정 여부(있음/없음, 값은 절대 출력 안 함)를 출력. 모델명·단가는 여전히 추측하지 않음(공급사 페이지에서 확인해 사용자가 기입). 한계: 대화형 설정 마법사는 아님.
   손으로 고친 설정 파일이 틀렸을 때(탭 들여쓰기·괄호 누락·ANSI 로 저장·값 오류)도 이제 한 줄 메시지 + 종료코드 2 — 이전엔 YAML 오류/인코딩 오류가 `providers` 등 일부 명령에서 트레이스백으로 샜음. 구현: `ConfigError(ValueError)` + `cli/app.py` 의 `DevorchTyper` 가 모든 명령을 감쌈(Typer 0.27 은 click 을 자체 포함해 `click.ClickException` 상속은 안 먹힘 — 시도했다가 실측으로 확인하고 버림). 가드를 끄면 테스트 4건 실패 확인.
 - **자기 코드로 사용해 보기(dogfood, 2026-10-13):** 이 저장소의 방금 커밋 3개를 `devorch review --level high`(실제 OpenAI+Gemini)로 리뷰, 합계 $0.0978. 결과: usage 명령 READY_WITH_WARNINGS, POSIX 종료 NOT_READY(차단 1), MCP 비용 READY.
@@ -103,7 +105,7 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
    `devorch_apply_changes` 로 커밋하는 뒷부분을 한 번 해 본다. 이후 mock 을 빼고 실제 리뷰어로 한 번(`--max-total-usd` 와 `limits.max_cost_usd` 사용).
 3. **구현 단계 비용 실측 늘리기(n=1 → 여러 건)**: `devorch run`(구현 포함)을 소액으로 중간 크기 작업 여러 건 실행(작업 전에 `devorch analyze` 의 예상 범위를 적어 두고 실제와 비교 — hold-out).
    출력이 구현/리뷰 단계별 호출·토큰·비용을 따로 보여준다(`WorkflowRun.role_usage`). 범위(`IMPLEMENTATION_OUTPUT_TOKENS`)가 틀리면 넓히고 좁히지 않는다.
-4. **현실적 평가 세트**: 시드 결함 대신 실제 오픈소스 버그 수정 커밋(알려진 버그)으로 탐지율·비용 평가. 판정은 사람 확인이 섞인 정답 라벨 필요.
+4. **현실적 평가 세트 (통제 중심 포지셔닝의 핵심 증거, 우선순위 상승)**: 설계는 `docs/EVAL_DESIGN.md`. 결정 필요: 언어 범위, 비용 상한(추정 ~$17), 라벨 확인 시간(추정 10~20시간), 공개 코드를 외부 API 로 보내도 되는지. 첫 단계(비용 0): 이 저장소 자체 역사에서 "나중에 고친 변경" 후보 수집.
 5. 위 데이터로 HIGH 기본 정책(리뷰어 3명)을 재검토: 단일 교차 회사 리뷰어 + 초점 프롬프트가 같은 탐지를 3분의 1 비용에 하는지. CRITICAL 의 독립 리뷰어 2명은 비용이 아니라 통제 규칙이라 측정만으로 바꾸지 않는다.
 6. 포트폴리오 케이스 스터디의 "미검증" 항목을 실측으로 갱신. 한계를 숨기지 않는 것이 강점.
 

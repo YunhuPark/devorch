@@ -36,6 +36,12 @@ from devorch.providers.mock import MockProvider
 from devorch.security.secret_redactor import has_secret_literal, redact
 from devorch.store import TaskRecord, TaskStore
 
+# READY must never read as "safe": it only says the configured reviewers found nothing that blocks. How well AI reviewers find real bugs
+# has only been measured on seeded defects, not on real code (HANDOFF.md).
+READY_CAVEAT = (
+    "READY 는 '지정된 리뷰어가 차단할 문제를 찾지 못했다'는 뜻이지 안전 보증이 아닙니다. AI 리뷰어가 실제 코드의 버그를 얼마나 찾는지는 "
+    "아직 검증되지 않았으니(인위적으로 심은 결함으로만 측정), 중요한 변경은 사람이 직접 확인하세요."
+)
 MAX_REVIEW_DIFF_BYTES = 200_000
 MAX_TEST_OUTPUT = 2000
 
@@ -372,6 +378,7 @@ class ControlPlane:
             "task_id": record.id,
             "diff_sha": record.diff_sha,
             "status": ev.status,
+            "caveat": READY_CAVEAT if ev.status in ("READY", "READY_WITH_WARNINGS") else None,
             "cached": cached,
             "blocking": [_finding(f) for f in ev.blocking],
             "warnings": [_finding(f) for f in ev.warnings],

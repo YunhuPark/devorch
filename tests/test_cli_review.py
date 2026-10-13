@@ -187,3 +187,18 @@ async def test_service_reviews_an_injected_diff_without_git_and_can_only_raise_t
 def test_config_file_prices_flow_into_the_review_estimate(repo):
     cfg = {"providers": {"openai": OA, "gemini": GE}}
     assert yaml.safe_load(yaml.safe_dump(cfg)) == cfg  # plain data: nothing exotic needed in config.yaml
+
+
+def test_a_ready_result_says_it_is_not_a_safety_guarantee_and_a_blocked_one_does_not(repo, monkeypatch):
+    """READY only means the reviewers found nothing that blocks; how well AI reviewers find real bugs has not been validated."""
+    Plane(repo).install(monkeypatch)
+    ok = review("-p", str(repo), "--git-range", "HEAD~1..HEAD", "--task", HIGH_TASK, "--yes")
+    assert ok.exit_code == 0 and "안전 보증이 아닙니다" in ok.output and "검증되지 않았" in ok.output
+    Plane(repo).install(monkeypatch)  # fresh scripted reviewers for the second call
+    as_json = review("-p", str(repo), "--git-range", "HEAD~1..HEAD", "--task", HIGH_TASK, "--yes", "--json")
+    out = json.loads(as_json.output[as_json.output.index("{"):])
+    assert out["status"] == "READY" and "안전 보증이 아닙니다" in out["caveat"]
+
+    Plane(repo, openai=(BLOCKING,)).install(monkeypatch)
+    blocked = review("-p", str(repo), "--git-range", "HEAD~1..HEAD", "--task", HIGH_TASK, "--yes")
+    assert blocked.exit_code == 1 and "안전 보증이 아닙니다" not in blocked.output
