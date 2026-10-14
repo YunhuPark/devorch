@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from collections.abc import Callable
 
@@ -55,6 +56,26 @@ def expected_calls(cases: list[Case], policy: Policy, modes: list[str], repeats:
     return sum(len(review_steps(policy, m)) for m in modes) * len(cases) * repeats
 
 
+# A provider that has run out of money fails EVERY later call the same way. Continuing only burns time and fills the report with
+# "incomplete" runs that say nothing about the reviewers (2026-10-14: 23 of 66 runs were lost to an empty OpenAI balance).
+# Deliberately narrow phrases: an ordinary rate limit (429 "rate_limit_exceeded") must NOT stop a run.
+_BILLING = re.compile(
+    r"insufficient_quota|credit_balance_exhausted|no credits remaining|exceeded your current quota|credit balance is too low|"
+    r"billing[_ ]hard[_ ]limit|payment required",
+    re.I,
+)
+
+
+def billing_problem(notes: list[str]) -> str | None:
+    """A one-line reason if any note says a provider's credit/quota is exhausted (None otherwise)."""
+    for note in notes:
+        if _BILLING.search(note):
+            who = re.search(r"\((openai|gemini|claude)\)", note) or re.search(r"\b(openai|gemini|anthropic|claude)\b", note, re.I)
+            name = who.group(1) if who else "provider"
+            return f"{name} 의 크레딧/한도가 소진되어 이후 호출은 모두 실패하므로 벤치마크를 중단했습니다. 충전한 뒤 다시 실행하세요(결과의 이 부분은 리뷰어의 능력이 아닙니다)."
+    return None
+
+
 async def run_case(case: Case, mode: str, repeat: int, policy: Policy, providers: ProviderRegistry) -> RunResult:
     analysis = analyze_task(case.task)
     impact = ImpactReport(direct_files=list(case.files))
@@ -97,16 +118,21 @@ async def run_benchmark(
     jobs = [(c, m, r) for m in modes for c in cases for r in range(repeats)]
     done = 0
     spent = 0.0
+    halted: str | None = None
 
     async def one(c: Case, m: str, r: int) -> RunResult:
-        nonlocal done, spent
+        nonlocal done, spent, halted
         async with sem:
-            if max_total_cost_usd is not None and spent >= max_total_cost_usd:
+            if halted:
+                res = score_run(c, m, r, [], False, notes=[f"[{c.id}] {halted}"])
+            elif max_total_cost_usd is not None and spent >= max_total_cost_usd:
                 note = f"[{c.id}] 벤치마크 비용 합계 상한 도달: ${spent:.4f} >= ${max_total_cost_usd:.4f} — 호출하지 않음"
                 res = score_run(c, m, r, [], False, notes=[note])
             else:
                 res = await run_case(c, m, r, policy, providers)
                 spent += res.cost_usd
+                if halted is None and (why := billing_problem(res.notes)):
+                    halted = why
         done += 1
         if on_progress:
             on_progress(done, len(jobs))

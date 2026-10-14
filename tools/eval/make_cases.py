@@ -32,6 +32,12 @@ INCLUDE = {
     "poetry": ["python-poetry/poetry", [10816, 10885, 10941, 10987, 11037, 11022, 11093]],
 }
 TRUTH = yaml.safe_load((Path(__file__).parent / "stage1_defects.yaml").read_text(encoding="utf-8"))
+# Control rules added AFTER stage 1 (2026-10-14), applied to every control alike: a commit that is itself marked work-in-progress is not a
+# "clean" change (glances 7acca16 "First part of the implementation..." had real bugs), and a commit younger than ~6 months has not had time
+# to be implicated in a fix. The stage-1 results with the old controls are kept as they were.
+REFERENCE_DAY = datetime(2026, 10, 14)
+MIN_CONTROL_AGE_DAYS = 180
+WIP = re.compile(r"\b(first part|part \d|wip|work in progress|partial|draft|initial implementation|start of|beginning of)\b", re.I)
 MAX_FILE_BYTES = 600_000  # whole-file before/after are stored; the reviewed DIFF is limited to 20 KB separately
 
 
@@ -144,6 +150,10 @@ def main() -> None:
                 if sha in used or sha[:10] in known_intros or sha == pfull:
                     continue
                 if abs((datetime.fromisoformat(day) - pd).days) > 365:
+                    continue
+                if (REFERENCE_DAY - datetime.fromisoformat(day)).days < MIN_CONTROL_AGE_DAYS:
+                    continue
+                if WIP.search(git(repo, "log", "-1", "--format=%s", sha).decode("utf-8", "replace")):
                     continue
                 d = git(repo, "diff", f"{sha}^1..{sha}").decode("utf-8", "replace") if git(repo, "rev-list", "--parents", "-n", "1", sha).split()[1:] else ""
                 n = len(d.encode("utf-8"))

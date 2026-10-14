@@ -272,3 +272,42 @@ def test_report_says_n_a_when_no_trap_case_completed():
     res = [score_run(next(c for c in CASES if c.id == "c10_clean_tests_docs"), "single", 0, [], True)]
     text = render_report(CASES, res, ["single"], mock=False, repeats=1)
     assert "오탐률(함정)" in text and "n/a" in text
+
+
+# ---- a provider that ran out of money must stop the run, not fill the report with meaningless "incomplete" rows ------------------------
+class _Counting(MockProvider):
+    def __init__(self, name, message):
+        super().__init__(name, ["[]"])
+        self.message, self.calls_made = message, 0
+
+    async def generate(self, request):
+        self.calls_made += 1
+        raise RuntimeError(self.message)
+
+
+async def test_an_exhausted_balance_halts_the_run_after_the_first_failure_and_says_who():
+    from devorch.bench.runner import billing_problem
+
+    boom = _Counting("openai", "Error code: 429 - {'error': {'code': 'credit_balance_exhausted', 'message': 'You have no credits remaining.'}}")
+    res = await run_benchmark(CASES, POLICY, registry(lambda n: boom if n == "openai" else MockProvider(n, ["[]"])), ["single"], concurrency=1)
+    assert boom.calls_made == 1 and len(res) == 16 and all(not r.completed for r in res)  # one real attempt, the rest never started
+    first_failure = next(r for r in res if any("credit_balance_exhausted" in n for n in r.notes))
+    assert billing_problem(first_failure.notes)  # detected on the original provider error
+    halt_note = res[-1].notes[0]  # the cases that never started say why
+    assert "openai" in halt_note and "충전" in halt_note and "리뷰어의 능력이 아닙니다" in halt_note
+
+
+async def test_an_ordinary_rate_limit_does_not_halt_the_run():
+    boom = _Counting("openai", "Error code: 429 - rate_limit_exceeded: slow down")
+    await run_benchmark(CASES, POLICY, registry(lambda n: boom if n == "openai" else MockProvider(n, ["[]"])), ["single"], concurrency=1)
+    assert boom.calls_made == 16  # every case was still attempted
+
+
+def test_billing_detection_is_narrow():
+    from devorch.bench.runner import billing_problem
+
+    assert billing_problem(["x (gemini): Your credit balance is too low to access the API"]) is not None
+    assert billing_problem(["review(openai) 호출 실패: RateLimitError: 429 rate_limit_exceeded"]) is None
+    assert billing_problem(["[c1] diff는 정상, 비용 합계 상한 도달"]) is None
+    assert billing_problem([]) is None
+    assert "gemini" in billing_problem(["the gemini account: insufficient_quota"])  # provider named even without the (name) form
