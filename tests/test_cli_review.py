@@ -202,3 +202,27 @@ def test_a_ready_result_says_it_is_not_a_safety_guarantee_and_a_blocked_one_does
     Plane(repo, openai=(BLOCKING,)).install(monkeypatch)
     blocked = review("-p", str(repo), "--git-range", "HEAD~1..HEAD", "--task", HIGH_TASK, "--yes")
     assert blocked.exit_code == 1 and "안전 보증이 아닙니다" not in blocked.output
+
+
+# ---- the refusal says WHERE the credential-shaped string is (never the string itself) -------------------------------------------
+def _diff_with_key(key):
+    return (
+        "diff --git a/app/conf.py b/app/conf.py\n--- a/app/conf.py\n+++ b/app/conf.py\n@@ -1,3 +1,5 @@\n"
+        " import os\n \n+TOKEN = os.environ.get('X')\n+API = '" + key + "'\n DEBUG = False\n"
+    )
+
+
+def test_credential_refusal_names_file_and_line_but_not_the_secret(tmp_path, monkeypatch):
+    from devorch.service import secret_locations
+
+    key = "sk-" + "a1B2c3D4e5" * 3  # assembled at run time: the literal would make THIS commit unreviewable
+    diff = _diff_with_key(key)
+    assert secret_locations(diff) == ["app/conf.py:4"]  # new-file line number: 1 import, 2 blank, 3 TOKEN, 4 API
+    assert secret_locations(_diff_with_key("not-a-key")) == []
+
+    f = tmp_path / "c.diff"
+    f.write_text(diff, encoding="utf-8")
+    Plane(tmp_path).install(monkeypatch)
+    r = review("-p", str(tmp_path), "--diff-file", str(f), "--level", "medium", "--yes")
+    assert r.exit_code != 0 and "app/conf.py:4" in r.output and "가짜 키" in r.output
+    assert key not in r.output and key[:12] not in r.output  # location only

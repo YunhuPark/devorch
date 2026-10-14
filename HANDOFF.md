@@ -13,7 +13,7 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 설치: `python -m venv .venv` → `.venv\Scripts\Activate.ps1` → `pip install -e ".[dev,llm]"` → `pytest`. 막히면 `devorch doctor`.
 
 ## 현재 상태 (2026-10-09, 사실만)
-- **테스트: Windows 네이티브에서 488 passed, 2 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
+- **테스트: Windows 네이티브에서 489 passed, 2 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
   이 PC의 `git.exe` 실행이 간헐적으로 거부됨(WinError 5, 원인 미확정, `git/manager.py` 에 Windows 한정 재시도 완화책).
 - **설치·플랫폼 검증(2026-10-13, "사용자 실사용" 1단계):** 휠을 깨끗한 venv(짧은 경로)에 설치해 키 없이 `init → analyze → doctor → run --mock → bench cases` 가 모두 동작(패키지 데이터 포함, 출력을 파이프로 보낸 cp949 상태에서도).
   찾아 고친 것: 출력이 리다이렉트되면(cp949) `devorch doctor` 가 `—` 때문에 UnicodeEncodeError 로 죽음 → 출력 인코딩 오류를 `?` 로 대체(수정 전 실패 확인한 테스트).
@@ -23,6 +23,8 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
   (2)(3) 테스트 가정 2건(subprocess 출력 인코딩·색, 대소문자 구분 파일시스템에서의 PATHEXT) — 제품 코드 문제 아님. 로컬 Windows 에서는 못 보던 것들이라 CI 가치가 확인됨.
   Linux/macOS 는 이제 **테스트 스위트와 깨끗한 설치 수준에서** 확인됨. 여전히 미검증: Linux/macOS 에서의 실제 `devorch run --apply`/MCP 사용, 실제 Docker, 실제 npm/mvn/gradle.
   WSL(Ubuntu, python 3.14.4)에서의 시도는 `python3-venv`/pip 부재로 중단(sudo 설치가 필요해 사용자 시스템을 건드리지 않음).
+- **자격증명 거부 메시지에 위치 추가(2026-10-14):** 사용자가 `devorch review --git-range HEAD~1..HEAD` 에서 "credential 형태의 문자열" 거부를 만났는데 어디인지 알 수 없었음(원인: 우리 테스트의 가짜 키 `sk-test-…`; 거부는 정상 동작). 이제 `파일:줄` 을 알려 줌(문자열은 절대 출력 안 함). 테스트의 가짜 키는 실행 중에 조립할 것.
+- **평가 세트 사전 조사(2026-10-14, 비용 0):** 자체 역사는 양성이 거의 없고(크기 맞는 도입 커밋 3개) AI 리뷰어 지적에서 나온 수정은 순환 라벨이라 보조로 격하. 공개 저장소 8곳에 후보 수정 PR 106건(메타데이터만; 도입 커밋 추적·라벨 검증 수율은 미측정). 다음: 파일럿(저장소 2~3곳, 약 10건을 끝까지 검증해 수율과 건당 시간 측정). 상세는 `docs/EVAL_DESIGN.md` 변경 기록. 마이너: `tools/eval/mine_szz.py`.
 - **READY 문구(2026-10-13):** 리뷰 결과 `READY`/`READY_WITH_WARNINGS` 에 "안전 보증이 아닙니다 — AI 리뷰어의 실제 버그 탐지율은 검증되지 않았음" 문구를 CLI 출력과 MCP 결과(`caveat`)에 항상 붙임(없었음). 차단 결과에는 붙이지 않음.
 - **방향(사용자 판단, 2026-10-13):** 현업에서는 "잘못된 코드가 그대로 반영되는 것"이 가장 중요하다고 봄 → 통제 중심 포지셔닝. 그러면 가장 약한 증거(실제 코드에서의 탐지율·오탐)가 핵심 약점. 설계: `docs/EVAL_DESIGN.md` (사전 등록, 아직 실행 안 함).
 - **첫 사용 안내(2026-10-13):** `devorch init` 이 `model: null` 과 단가 없음만 만들고 아무 안내도 없던 것을 고침 — config.yaml 에 설명 주석, 단가 칸(`input_per_mtok`/`output_per_mtok`: null = 모르는 값, 호출은 되고 비용은 '알 수 없음')을 미리 만들고, 다음 단계와 이 터미널의 키 설정 여부(있음/없음, 값은 절대 출력 안 함)를 출력. 모델명·단가는 여전히 추측하지 않음(공급사 페이지에서 확인해 사용자가 기입). 한계: 대화형 설정 마법사는 아님.

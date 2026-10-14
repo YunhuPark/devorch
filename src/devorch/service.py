@@ -11,6 +11,7 @@ test result and approval for the old diff stop counting.
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +49,27 @@ MAX_TEST_OUTPUT = 2000
 
 class ControlPlaneError(RuntimeError):
     """Bad input / unusable state. Surfaced to the MCP client as a tool error."""
+
+
+_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)")
+
+
+def secret_locations(diff: str) -> list[str]:
+    """``path:line`` of the ADDED lines that look like credentials (never the text itself), for the refusal message."""
+    out: list[str] = []
+    path, line_no = "?", 0
+    for line in diff.splitlines():
+        if line.startswith("+++ "):
+            path = line[4:].removeprefix("b/").strip()
+        elif (m := _HUNK.match(line)):
+            line_no = int(m.group(1))
+        elif line.startswith("+"):
+            if has_secret_literal(line[1:]):
+                out.append(f"{path}:{line_no}")
+            line_no += 1
+        elif line.startswith(" "):
+            line_no += 1
+    return out
 
 
 def sha_of(diff: str) -> str:
@@ -150,7 +172,13 @@ class ControlPlane:
         except PatchError as e:
             raise ControlPlaneError(f"diff 검증 실패: {e}") from e
         if has_secret_literal(diff):
-            raise ControlPlaneError("diff에 credential 형태의 문자열이 있어 외부 LLM으로 보내지 않습니다. 제거 후 다시 시도하세요.")
+            where = secret_locations(diff)
+            shown = ", ".join(where[:5]) + (f" 외 {len(where) - 5}곳" if len(where) > 5 else "")
+            raise ControlPlaneError(
+                "diff에 credential 형태의 문자열이 있어 외부 LLM으로 보내지 않습니다"
+                + (f" — 위치: {shown}" if where else "")
+                + ". 제거하고 다시 시도하세요. (테스트용 가짜 키도 진짜 키와 구별되지 않아 거부됩니다 — 테스트에서는 키를 실행 중에 조립하세요. 예: \"sk-\" + \"x\" * 30)"
+            )
         if len(diff.encode("utf-8")) > MAX_REVIEW_DIFF_BYTES:
             raise ControlPlaneError(f"diff가 너무 큽니다(>{MAX_REVIEW_DIFF_BYTES // 1000}KB). 작업을 나눠서 진행하세요.")
 
