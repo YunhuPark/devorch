@@ -1,0 +1,47 @@
+# Ground truth for evaluation stage 1 (docs/EVAL_DESIGN.md), written BEFORE any reviewer ran, from the fix PR's text and diff.
+# Only the judge sees these. The key is the fix PR number in the repo named by the case id. One root problem per entry, in neutral terms.
+# Label evidence for every entry: the fix PR's own tests fail on the parent of the fix and pass after it (tools/eval/verify_label.py).
+glances:
+  3674: >-
+    The filter string is split on every colon (value.split(':')) and only the second field is kept, so a regex that itself contains
+    a colon (for example cmdline:C:/Program Files/.*) is silently truncated to "C". The truncated text still compiles as a regex, so no
+    error is raised and the process the filter was written for is wrongly rejected.
+  3683: >-
+    The nf_conntrack percentage decoration is computed with get_alert(header='nf_conntrack_percent') without passing the current value,
+    so get_alert uses its default of 0 and the result is always OK. The configured careful/warning/critical thresholds can never fire.
+  3684: >-
+    The disk IO alert is computed from read_bytes / write_bytes, which are psutil lifetime counters since boot, but compared against
+    bitrate thresholds, so a configured threshold is crossed within seconds and stays crossed. It should use the per-second rate (as the
+    network plugin does), and the decoration should be set on the field the web UI reads.
+  3685: >-
+    In the per-CPU computation the guest_nice field is filled from the steal value instead of cpu_times.guest_nice, so per-CPU
+    guest-nice usage is reported wrongly whenever the two differ.
+  3687: >-
+    The summary row for the CPUs that are not displayed averages the same slice of cores that is already displayed
+    (percpu_list[0:max_cpu_display]) instead of the remaining cores, so it over-reports because the displayed cores are the busiest.
+poetry:
+  10816: >-
+    HTTP responses are cached with cachecontrol's FileCache, which serializes the response body together with the metadata. For responses
+    larger than 2 GiB this raises "ValueError: memoryview is too large". SeparateBodyFileCache, which stores the body separately,
+    should be used.
+  10885: >-
+    The new package-name validation in "poetry update <package>" only accepts packages declared directly in pyproject.toml, so updating a
+    transitive dependency (present in the lock file but not declared) is rejected with an error. Transitive dependencies must stay updatable.
+  10941: >-
+    When virtualenvs.create is false and the current Python does not satisfy the project's Python constraint, the code still searches for
+    a compatible interpreter and then carries on with the system environment, i.e. the incompatible Python, instead of failing with an
+    incompatible-Python error.
+  10987: >-
+    When a VCS dependency gains an extra (pkg[extra]) and the package is reused from the lock file, the extra's own dependencies are
+    silently dropped: they are looked up by matching package.extras names against package.requires, but for a reused locked package
+    requires was pruned to the extras that were active in the earlier resolution.
+  11037: >-
+    The sdist tar-extraction security fallback clears ownership names (uname/gname) with None. On Python versions before 3.10.12 and 3.11.4
+    tarfile passes them to grp.getgrnam()/pwd.getpwnam(), which raises, so installing sdists as root fails. Empty strings should be used.
+  11022: >-
+    When a directory or Git dependency keeps the same name, version and source but changes between editable and non-editable (the develop
+    flag), the transaction treats the installed and resolved packages as unchanged, so "poetry sync" does not reinstall it and the
+    previous install mode stays.
+  11093: >-
+    Validating an uninstall operation for a path dependency requires the source path to exist. If the dependency was removed and its
+    directory is gone, "poetry sync" fails with "Path ... does not exist" although uninstalling does not need the source.
