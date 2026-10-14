@@ -43,6 +43,8 @@ def run_state(repo: str, python: str, work: Path, label: str, rev: str, tests_fr
             git(str(wt), "checkout", tests_from, "--", *tests)  # the PR's tests on top of this state's source
         env = {k: v for k, v in os.environ.items() if not SENSITIVE.search(k)}
         env["PYTHONDONTWRITEBYTECODE"] = "1"
+        # the worktree's own source must win over any installed copy of the project (src layout or flat layout)
+        env["PYTHONPATH"] = os.pathsep.join([p for p in (str(wt / "src"), str(wt)) if Path(p).is_dir()])
         r = subprocess.run(
             [python, "-m", "pytest", "-q", "-p", "no:cacheprovider", "--no-header", "-x", "--tb=short", *tests],
             cwd=wt, capture_output=True, env=env, timeout=300,
@@ -70,7 +72,10 @@ def main() -> None:
         run_state(repo, python, work, f"{merge[:7]}_after_fix", merge, merge, tests),
     ]
     if intro:
-        res.append(run_state(repo, python, work, f"{merge[:7]}_at_intro_{intro[:7]}", intro, merge, tests))
+        try:  # the old state may not even check out/run; that must not hide the two results above
+            res.append(run_state(repo, python, work, f"{merge[:7]}_at_intro_{intro[:7]}", intro.strip(), merge, tests))
+        except Exception as e:  # noqa: BLE001
+            res.append({"label": f"{merge[:7]}_at_intro_{intro[:7]}", "rc": -1, "kind": "error", "summary": str(e)[:120]})
     for r in res:
         print(f'  {r["label"]:<40} {r["kind"]:<13} rc={r["rc"]}  {r["summary"]}')
     ok = res[0]["kind"] == "fail" and res[1]["kind"] == "pass"
