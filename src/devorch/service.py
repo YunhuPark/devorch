@@ -19,6 +19,7 @@ from devorch.audit import AuditLogger
 from devorch.config import Policy, devorch_dir, load_config, load_policy
 from devorch.core.analyzer.impact_analyzer import analyze_impact
 from devorch.core.analyzer.risk_engine import assess_risk
+from devorch.core.analyzer.diff_reassess import reassess_from_diff
 from devorch.core.analyzer.task_analyzer import analyze_task
 from devorch.core.evaluator.evaluator import evaluate
 from devorch.core.execution.sandbox import load_sandbox
@@ -194,7 +195,28 @@ class ControlPlane:
             record.run.evaluation, record.run.findings = None, []
         record.diff, record.diff_sha = diff, sha
         record.run.implementation = diff
+        self._reassess_from_diff(record)
         return sha
+
+    def _reassess_from_diff(self, record: TaskRecord) -> None:
+        """Raise-only re-assessment against the files the diff really touches (core/analyzer/diff_reassess.py). The first analysis saw only the
+        task description; the gates (tests, reviewers, human approval) must not depend on it alone."""
+        run = record.run
+        if not (run.analysis and run.risk and run.impact and run.plan):
+            return
+        analysis, risk, impact, reasons = reassess_from_diff(run.analysis, run.risk, run.impact, validate_diff(record.diff))
+        if not reasons:
+            return
+        before = run.plan
+        run.analysis, run.risk, run.impact = analysis, risk, impact
+        run.plan = plan_routing(analysis, risk, impact, self.policy, prices=self._prices())
+        self.store.save(record)
+        self._log(
+            record, "diff_reassessed", reasons=reasons, risk=risk.level.value,
+            run_tests=[before.run_tests, run.plan.run_tests],
+            reviewers=[[f"{s.role}:{s.provider}" for s in before.review_steps], [f"{s.role}:{s.provider}" for s in run.plan.review_steps]],
+            approval=[before.requires_human_approval, run.plan.requires_human_approval],
+        )
 
     def _gate_status(self, record: TaskRecord) -> dict[str, Any]:
         run, plan = record.run, record.run.plan
@@ -326,10 +348,10 @@ class ControlPlane:
     def preview_review(self, task_id: str, diff: str | None = None) -> dict[str, Any]:
         """What a review would involve, with NO LLM call: the diff (validated), the reviewers, and the cost estimate."""
         record = self._load(task_id)
+        sha = self._capture_diff(record, diff)  # may raise the plan (see _reassess_from_diff), so read the plan afterwards
+        self.store.save(record)
         plan = record.run.plan
         assert plan
-        sha = self._capture_diff(record, diff)
-        self.store.save(record)
         steps = plan.review_steps
         est = self._estimate_review(record, steps, log=False)
         return {
@@ -345,6 +367,7 @@ class ControlPlane:
 
     async def request_review(self, task_id: str, diff: str | None = None) -> dict[str, Any]:
         record = self._load(task_id)
+        sha = self._capture_diff(record, diff)  # first: it may raise the plan (more reviewers, tests, approval) from the real diff
         run, plan = record.run, record.run.plan
         assert plan
         steps = plan.review_steps
@@ -358,7 +381,6 @@ class ControlPlane:
         if (problem := budget_preflight(self.providers, {s.provider for s in steps}, cap)) is not None:
             raise ControlPlaneError(problem)
 
-        sha = self._capture_diff(record, diff)
         ev = run.evaluation
         if record.reviewed_sha == sha and ev is not None and not ev.missing_reviews:
             self.store.save(record)
