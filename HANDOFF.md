@@ -13,7 +13,7 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 설치: `python -m venv .venv` → `.venv\Scripts\Activate.ps1` → `pip install -e ".[dev,llm]"` → `pytest`. 막히면 `devorch doctor`.
 
 ## 현재 상태 (2026-10-09, 사실만)
-- **테스트: Windows 네이티브에서 503 passed, 2 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
+- **테스트: Windows 네이티브에서 514 passed, 2 skipped** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
   이 PC의 `git.exe` 실행이 간헐적으로 거부됨(WinError 5, 원인 미확정, `git/manager.py` 에 Windows 한정 재시도 완화책).
 - **설치·플랫폼 검증(2026-10-13, "사용자 실사용" 1단계):** 휠을 깨끗한 venv(짧은 경로)에 설치해 키 없이 `init → analyze → doctor → run --mock → bench cases` 가 모두 동작(패키지 데이터 포함, 출력을 파이프로 보낸 cp949 상태에서도).
   찾아 고친 것: 출력이 리다이렉트되면(cp949) `devorch doctor` 가 `—` 때문에 UnicodeEncodeError 로 죽음 → 출력 인코딩 오류를 `?` 로 대체(수정 전 실패 확인한 테스트).
@@ -24,6 +24,11 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
   Linux/macOS 는 이제 **테스트 스위트와 깨끗한 설치 수준에서** 확인됨. 여전히 미검증: Linux/macOS 에서의 실제 `devorch run --apply`/MCP 사용, 실제 Docker, 실제 npm/mvn/gradle.
   WSL(Ubuntu, python 3.14.4)에서의 시도는 `python3-venv`/pip 부재로 중단(sudo 설치가 필요해 사용자 시스템을 건드리지 않음).
 - **자격증명 거부 메시지에 위치 추가(2026-10-14):** 사용자가 `devorch review --git-range HEAD~1..HEAD` 에서 "credential 형태의 문자열" 거부를 만났는데 어디인지 알 수 없었음(원인: 우리 테스트의 가짜 키 `sk-test-…`; 거부는 정상 동작). 이제 `파일:줄` 을 알려 줌(문자열은 절대 출력 안 함). 테스트의 가짜 키는 실행 중에 조립할 것.
+- **적대적 점검 2(2026-10-15): 승인·테스트·커밋 약속을 에이전트 입장에서 깨 봄(스크립트 에이전트로 실제 서비스에 시도).** 처음 결과에서 P1·P5 가 BROKEN 으로 나왔지만 *내 점검 코드의 기대가 틀린 것*이었음(커밋되는 것은 작업 트리가 아니라 검토·승인된 스냅샷 — 내용을 직접 확인해 HELD 로 정정). 진짜 구멍 2개:
+  (1) **에이전트가 스스로 승인할 수 있었음** — `.devorch/tasks/<id>.approval.json` 한 파일을 직접 쓰면 `approval_required` → `committed`. 주석의 "도구 호출로는 승인을 쓸 수 없다"는 맞지만, 에이전트는 도구 없이 파일을 쓸 수 있음. 작업 기록 JSON 도 마찬가지(처음엔 worktree 경로가 없어서 우연히 막혔을 뿐).
+  (2) **테스트·승인 뒤 worktree 를 바꿔도 커밋됨** — `commit()` 이 worktree 에 있는 것을 그대로 커밋, 커밋 메시지에는 `Human-Approved: yes`. 재현: 테스트·승인 후 파일을 `return a - b # tampered` 로 바꾸니 그대로 커밋됨.
+  수정: (a) `security/signing.py` — HMAC, 키는 프로젝트 밖(`~/.devorch/state.key`, `DEVORCH_KEY_FILE`). 승인과 작업 기록(서명을 같은 파일 안에 넣어 쓰기가 원자적)을 서명하고, 서명이 없거나 틀리면 승인은 무시(+ 응답에 이유 표시)·기록은 거부. 키를 못 읽으면 아무것도 신뢰하지 않음(fail-closed). (b) 테스트 직후 worktree 전체 내용의 해시(`git write-tree`, 임시 index)를 기록(`tested_tree`)하고 커밋 전에 다시 계산해 다르면 거부(감사 로그 `blocked_worktree_changed`). 테스트가 만든 `__pycache__` 등은 테스트 *후*에 해시하므로 포함됨. 두 보호 모두 끄면 공격 테스트가 실패함을 확인. 최종 점검 6/6 HELD.
+  **한계(정직하게):** 같은 OS 사용자의 코드는 키를 읽을 수 있고, 테스트 명령은 에이전트가 쓴 코드를 호스트에서 실행하므로(샌드박스 none) 일부러 악의적인 에이전트는 이를 우회할 수 있음. 막으려면 Docker 샌드박스(실제 Docker 미검증)나 별도 OS 사용자. 현재 보호 대상은 실수·혼동·프롬프트 주입으로 파일을 건드리는 에이전트. 이전 버전의 작업 기록·승인 파일은 서명이 없어 거부됨(`analyze_task` 로 새로 시작). 아직 안 해 본 점검: 승인 파일 삭제/교체의 경합, 동시 두 서버 프로세스, 감사 로그 변조(감사 로그는 서명하지 않음 — 변조 가능).
 - **위험도 판단 점검과 발견한 구멍(2026-10-15):** 평가에 쓴 22개 실제 변경에 위험도 분석을 돌림. (1) 위험도는 버그 가능성을 *예측하지 못함*: 버그 있는 변경 11개는 low 7·medium 4(평균 점수 13.7), 깨끗한 대조군 11개는 low 8·medium 2·critical 1(평균 21.6). 점수는 작업 설명의 키워드(auth, dependency 등)로 정해져 *민감한 영역*을 재는 것이지 결함 확률이 아님 → 문서에서 위험도를 "버그 예측"으로 말하면 안 됨.
   (2) **실제 구멍 발견·재현·수정:** 게이트(테스트 필요 여부, 리뷰어, 사람 승인)가 작업 *설명*만으로 정해졌고, MCP 흐름에서 그 설명은 변경을 만드는 에이전트가 씀. "문서 문구 수정"이라고 설명하고 `check_password()` 를 항상 True 로 바꾼 diff 가 docs/LOW → 테스트·리뷰어·승인 없이 READY → 브랜치에 커밋됨(별도 브랜치라 현재 브랜치는 무사, 하지만 DevOrch 는 아무 경고도 안 냄). 수정: diff 가 생기면 실제 파일로 *올리기만 하는* 재평가(`core/analyzer/diff_reassess.py`, `_capture_diff` 한 곳) — docs 작업인데 문서 이외 파일을 바꾸면 코드 변경으로 취급(테스트 필수), 보안/DB 경로면 영향 범위에 반영(보안 리뷰어 추가), 레벨은 절대 안 내림, 감사 로그 `mcp:diff_reassessed`. 같은 재현에서 수정 후: 보안 리뷰어 추가, apply 가 테스트 전에는 거부, 테스트가 깨진 인증 검사를 잡음. 진짜 문서만 바꾸는 변경은 그대로 테스트·리뷰 없이 통과(테스트로 고정). 서비스 수준 테스트는 훅을 끄면 실패함을 확인.
   **한계(정직하게):** 경로 이름만 본다 — 중립적인 파일명 안의 위험한 수정은 못 알아챔. 경로 기준 보안 반영은 위험도 점수를 올리고 보안 리뷰어를 붙이지만, 작업 설명에 "auth" 를 쓴 경우처럼 HIGH 로 강제하거나 사람 승인을 요구하지는 않음(키워드 오탐으로 승인 요청이 폭증하지 않게 일부러 약하게 둠 — 논의 필요). `devorch run`(엔진이 직접 구현) 경로는 재평가하지 않음(작업 설명을 사용자가 직접 씀).

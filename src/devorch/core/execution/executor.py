@@ -169,6 +169,17 @@ class Executor:
         return result.ok
 
     # ------------------------------------------------------------- commit
+    def tree_hash(self, run: "WorkflowRun") -> str | None:
+        """Content hash of the run's worktree (None if it is gone). Taken right after the tests passed and compared again before the commit:
+        a worktree that changed in between is NOT what was tested or approved."""
+        path = self._worktree(run)
+        if path is None:
+            return None
+        try:
+            return self.git.tree_hash(path)
+        except GitError:
+            return None
+
     async def commit(self, run: "WorkflowRun") -> None:
         path = self._worktree(run)
         if path is None:

@@ -208,10 +208,10 @@ def test_python_dash_m_devorch_runs_the_same_cli(tmp_path):
 
 # ---- `devorch run`: the implementer sees the real files (not only with --apply) and the cost is reported ----------
 def _git_repo(tmp_path):
-    import subprocess
+    from gitutil import run_git  # retries the intermittent Windows "access denied" on git.exe launch (a plain subprocess.run does not)
 
     def git(*a):
-        subprocess.run(["git", *a], cwd=tmp_path, check=True, capture_output=True, text=True, encoding="utf-8")
+        run_git(tmp_path, *a)
 
     git("init", "-q", "-b", "main")
     git("config", "user.email", "t@example.com")

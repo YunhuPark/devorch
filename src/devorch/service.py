@@ -191,7 +191,7 @@ class ControlPlane:
                 record.run.state = State.PLANNED
             elif record.run.worktree or record.run.branch:
                 self.executor.discard(record.run)
-            record.reviewed_sha = record.tested_sha = None
+            record.reviewed_sha = record.tested_sha = record.tested_tree = None
             record.run.evaluation, record.run.findings = None, []
         record.diff, record.diff_sha = diff, sha
         record.run.implementation = diff
@@ -467,7 +467,7 @@ class ControlPlane:
             return {"task_id": record.id, "status": "skipped", "reason": "이 작업 유형은 테스트가 필요하지 않습니다."}
 
         self.executor.discard(run)  # always test from a clean worktree
-        record.tested_sha = None
+        record.tested_sha = record.tested_tree = None
         try:
             await self.executor.apply(run)
         except ExecutionError as e:
@@ -477,6 +477,8 @@ class ControlPlane:
 
         ok = await self.executor.test(run)
         record.tested_sha = record.diff_sha if ok else None
+        # what was tested is the worktree's CONTENT now; if it changes before the commit, the tests no longer vouch for it
+        record.tested_tree = self.executor.tree_hash(run) if ok else None
         self.store.save(record)
         self._log(record, "run_tests", status="passed" if ok else "failed", summary=run.test_summary)
         return {
@@ -501,6 +503,13 @@ class ControlPlane:
                 return {"task_id": record.id, "status": "blocked", "reason": "현재 diff에 대해 통과한 테스트가 없습니다. devorch_run_tests 를 먼저 호출하세요."}
             if not (run.worktree and Path(run.worktree).is_dir()):
                 return {"task_id": record.id, "status": "blocked", "reason": "테스트한 worktree가 사라졌습니다. devorch_run_tests 를 다시 호출하세요."}
+            if not record.tested_tree or self.executor.tree_hash(run) != record.tested_tree:
+                self._log(record, "apply_changes", status="blocked_worktree_changed")
+                return {
+                    "task_id": record.id,
+                    "status": "blocked",
+                    "reason": "테스트한 worktree 의 내용이 테스트 이후 바뀌었거나 확인할 수 없습니다. 검토·테스트·승인은 바뀌기 전 내용에 대한 것이라 커밋하지 않습니다. devorch_run_tests 를 다시 호출하세요.",
+                }
 
         approval = self._approval_state(record)
         if approval != "not_required":
@@ -515,6 +524,7 @@ class ControlPlane:
                     "task_id": record.id,
                     "status": "approval_required",
                     "reason": "stale: 이전 diff에 대한 승인이라 무효입니다." if approval == "stale" else "이 변경은 사람의 승인이 필요합니다.",
+                    "note": "승인 파일이 있지만 서명이 맞지 않아 무시했습니다(DevOrch 밖에서 만들어진 파일). 사람의 승인은 `devorch approve` 로만 유효합니다." if self.store.approval_file_rejected(record.id) else None,
                     "approval_reasons": plan.approval_reasons,
                     "how_to_approve": f"사용자가 직접 터미널에서 `devorch approve {record.id}` 를 실행해야 합니다. 에이전트는 승인할 수 없습니다.",
                 }

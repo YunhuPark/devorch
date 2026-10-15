@@ -161,6 +161,14 @@ class GitManager:
         status = self._git(["status", "--porcelain"], cwd=worktree).stdout.splitlines()
         return [line[3:] for line in status]
 
+    def tree_hash(self, worktree: Path) -> str:
+        """Hash of the FULL content of ``worktree`` (tracked and untracked files, honouring .gitignore), computed with a throw-away index
+        so nothing in the worktree is staged. Equal hash = identical content."""
+        with tempfile.TemporaryDirectory() as td:
+            env = {**os.environ, "GIT_INDEX_FILE": str(Path(td) / "index")}
+            self._git(["add", "-A"], cwd=worktree, env=env)
+            return self._git(["write-tree"], cwd=worktree, env=env).stdout.strip()
+
     def commit(self, worktree: Path, message: str) -> str:
         self._git(["add", "-A"], cwd=worktree)
         if not self._git(["status", "--porcelain"], cwd=worktree).stdout.strip():

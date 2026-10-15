@@ -9,6 +9,7 @@ import subprocess
 import sys
 
 import pytest
+from gitutil import run_git
 
 from devorch.config import Policy
 from devorch.core.analyzer.diff_reassess import is_doc_file, reassess_from_diff
@@ -66,7 +67,7 @@ def test_a_security_looking_path_raises_the_impact_and_never_lowers_anything():
 @pytest.fixture
 def repo(tmp_path):
     def git(*a):
-        subprocess.run(["git", *a], cwd=r, check=True, capture_output=True)
+        run_git(r, *a)
 
     r = tmp_path / "proj"
     r.mkdir()
