@@ -218,7 +218,26 @@ def init_project(root: Path, force: bool = False) -> list[Path]:
         created.append(path)
 
     gi = d / ".gitignore"
-    if not gi.exists():
-        gi.write_text("audit.jsonl\naudit.head\naudit.jsonl.lock\nruns/\n", encoding="utf-8")
+    existed = gi.exists()
+    ensure_gitignore(d)
+    if not existed and gi.exists():
         created.append(gi)
     return created
+
+
+# DevOrch's own local state: never something to commit (task records hold diffs and signed approvals tied to a local key).
+GITIGNORE_ENTRIES = ("audit.jsonl", "audit.head", "audit.jsonl.lock", "runs/", "worktrees/", "tasks/")
+
+
+def ensure_gitignore(d: Path) -> None:
+    """Make sure ``.devorch/.gitignore`` lists every local-state file DevOrch writes, adding what an older version of the file lacks.
+    Projects initialised before ``audit.head`` / ``audit.jsonl.lock`` existed otherwise show them as untracked (seen in the first real-client run)."""
+    gi = Path(d) / ".gitignore"
+    try:
+        have = gi.read_text(encoding="utf-8").splitlines() if gi.exists() else []
+        missing = [e for e in GITIGNORE_ENTRIES if e not in have]
+        if missing:
+            gi.parent.mkdir(parents=True, exist_ok=True)
+            gi.write_text("\n".join([*have, *missing]) + "\n", encoding="utf-8")
+    except OSError:
+        pass  # read-only checkout: the entries are a convenience, never a reason to fail

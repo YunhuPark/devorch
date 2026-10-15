@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from devorch.config import Policy, devorch_dir
+from devorch.config import Policy, devorch_dir, ensure_gitignore
 from devorch.core.execution.patch import PatchError, extract_diff, validate_diff
 from devorch.core.execution.sandbox import SandboxConfig, run_tests_docker
 from devorch.core.execution.test_runner import detect_test_command, run_tests
@@ -120,10 +120,7 @@ class Executor:
             raise ExecutionError(f"diff 검증 실패: {e}") from e
 
         # make sure worktrees never show up as untracked noise in the user's repo
-        gi = devorch_dir(self.root) / ".gitignore"
-        gi.parent.mkdir(parents=True, exist_ok=True)
-        if not gi.exists():
-            gi.write_text("audit.jsonl\naudit.head\naudit.jsonl.lock\nruns/\nworktrees/\n", encoding="utf-8")
+        ensure_gitignore(devorch_dir(self.root))
 
         branch = self.git.unique_branch(GitManager.branch_name(run.id, run.task_text))
         path = devorch_dir(self.root) / "worktrees" / run.id

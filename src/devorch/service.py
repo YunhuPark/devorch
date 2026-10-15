@@ -11,7 +11,9 @@ test result and approval for the old diff stop counting.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -75,6 +77,14 @@ def secret_locations(diff: str) -> list[str]:
         elif line.startswith(" "):
             line_no += 1
     return out
+
+
+def approve_command(root: Path, task_id: str) -> str:
+    """The command the user pastes into their terminal. It names the interpreter running THIS server (the `devorch` launcher failed on one Windows
+    setup, see HANDOFF) and passes -p, because the user's shell is usually not inside the project folder: a bare `devorch approve <id>` found no task."""
+    py = sys.executable
+    prefix = "& " if os.name == "nt" else ""  # PowerShell needs the call operator to run a quoted path
+    return f'{prefix}"{py}" -m devorch approve {task_id} -p "{root}"'
 
 
 def sha_of(diff: str) -> str:
@@ -550,7 +560,8 @@ class ControlPlane:
                     "note": "승인 파일이 있지만 서명이 맞지 않아 무시했습니다(DevOrch 밖에서 만들어진 파일). 사람의 승인은 `devorch approve` 로만 유효합니다." if self.store.approval_file_rejected(record.id) else None,
                     "approval_reasons": plan.approval_reasons,
                     "sandbox_warning": self._sandbox_warning(plan),
-                    "how_to_approve": f"사용자가 직접 터미널에서 `devorch approve {record.id}` 를 실행해야 합니다. 에이전트는 승인할 수 없습니다.",
+                    "how_to_approve": f"사용자가 직접 터미널에서 다음을 실행해야 합니다(에이전트는 승인할 수 없습니다): {approve_command(self.root, record.id)}"
+                    + ("   [PowerShell 기준 — cmd.exe 에서는 맨 앞의 '& ' 를 빼세요]" if os.name == "nt" else ""),
                 }
 
         try:

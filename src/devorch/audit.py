@@ -91,6 +91,10 @@ class AuditLogger:
         self.path = Path(path) if path else None
         if self.path:
             self.path.parent.mkdir(parents=True, exist_ok=True)
+            if self.path.parent.name == ".devorch":
+                from devorch.config import ensure_gitignore  # an older project's .gitignore does not know audit.head / the lock file
+
+                ensure_gitignore(self.path.parent)
             self.head_path = self.path.with_name(self.path.stem + ".head")
             self.lock_path = self.path.with_name(self.path.name + ".lock")
 
