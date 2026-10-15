@@ -49,6 +49,7 @@ pytest
 
 DevOrch가 통제하려는 에이전트는 보통 프로젝트 폴더에 파일을 쓸 수 있습니다. 그래서 상태 파일을 그냥 믿지 않습니다.
 - **승인과 작업 기록은 서명됩니다.** 서명 키는 프로젝트 밖(`~/.devorch/state.key`, 환경변수 `DEVORCH_KEY_FILE` 로 변경)에 있습니다. 파일 하나를 직접 써서 "승인됨"으로 만들면 서명이 맞지 않아 무시되고, 작업 기록을 고쳐도 거부됩니다(2026-10-14 이전에는 둘 다 가능했고 재현했습니다).
+- **샌드박스 없이 승인이 필요한 변경을 다루면 경고가 뜹니다.** `analyze_task` 와 `approval_required` 응답, 사람이 보는 `devorch approve` 화면, `devorch doctor` 에 "테스트가 이 컴퓨터에서 실행되므로 신뢰할 수 없는 에이전트는 스스로 승인할 수 있음"이 나옵니다. 더 엄격하게 쓰려면 `policy.yaml` 에 `approval: {require_sandbox_for_approval: true}` 를 켜세요(기본 꺼짐) — 그러면 Docker 샌드박스가 없을 때 사람 승인이 필요한 변경의 테스트는 **실행하지 않고 거부**합니다(승인이 필요 없는 변경은 그대로). 이 옵션은 MCP·`devorch review` 흐름에 적용되고, `devorch run` 은 승인이 같은 프로세스 안에서 이뤄져 해당이 없습니다.
 - **감사 로그는 변조를 *알아채게* 서명된 사슬입니다.** 각 기록에 순번·앞 기록의 서명·자기 서명이 들어가고, 마지막 서명과 개수는 서명된 `audit.head` 에도 남습니다. 기록을 고치거나 중간에서 지우거나 순서를 바꾸거나 끝부분을 잘라 내면 `devorch audit`(과 `devorch doctor`)가 찾아냅니다. **막는 것이 아닙니다:** 로그와 `audit.head` 를 통째로 지우면 검증할 것이 없고, 키를 읽을 수 있는 코드(샌드박스 없는 테스트)는 위조할 수 있습니다. 이 기능 이전의 로그는 "서명 이전" 구간으로 인정됩니다.
 - **커밋 직전에 테스트한 worktree 의 내용이 그대로인지 확인합니다.** 테스트·승인 뒤에 파일을 바꾸면 커밋하지 않습니다.
 - **작업 설명이 아니라 실제 diff 로 게이트를 올립니다**(문서 작업이라 해 놓고 코드를 바꾸면 테스트가 필수가 됨).
@@ -124,7 +125,7 @@ src/devorch/
 ├── cli/main.py
 ├── config.py  audit.py  models.py
 bench/          # (src/devorch/bench) 케이스·채점·러너·리포트, cases/*.yaml
-tests/              # 544 tests + 2 skip (Windows에서 symlink 권한이 없으면 skip)
+tests/              # 553 tests + 2 skip (Windows에서 symlink 권한이 없으면 skip)
 examples/demo-spring/   # 영향 분석 시연용 작은 Java 프로젝트
 ```
 

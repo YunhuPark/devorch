@@ -44,6 +44,10 @@ READY_CAVEAT = (
     "READY 는 '지정된 리뷰어가 차단할 문제를 찾지 못했다'는 뜻이지 안전 보증이 아닙니다. AI 리뷰어가 실제 코드의 버그를 얼마나 찾는지는 "
     "아직 검증되지 않았으니(인위적으로 심은 결함으로만 측정), 중요한 변경은 사람이 직접 확인하세요."
 )
+SANDBOX_WARNING = (
+    "이 변경은 사람의 승인이 필요한데 테스트가 이 컴퓨터에서 직접 실행됩니다(샌드박스 none). 신뢰할 수 없는 에이전트라면 그 테스트 코드가 서명 키를 읽어 "
+    "스스로 승인할 수 있습니다(재현됨). 신뢰할 수 없는 에이전트와 쓸 때는 config.yaml 의 project.sandbox 로 docker 를 설정하세요(docker 에서는 막힘을 확인)."
+)
 MAX_REVIEW_DIFF_BYTES = 200_000
 MAX_TEST_OUTPUT = 2000
 
@@ -198,6 +202,21 @@ class ControlPlane:
         self._reassess_from_diff(record)
         return sha
 
+    def _sandbox_warning(self, plan: Any) -> str | None:
+        """Shown wherever a human approval is involved while the tests run unsandboxed on this machine."""
+        if plan is not None and plan.requires_human_approval and plan.run_tests and not self.executor.sandbox.enabled:
+            return SANDBOX_WARNING
+        return None
+
+    def _sandbox_required_problem(self, plan: Any) -> str | None:
+        """policy.approval.require_sandbox_for_approval: refuse to RUN the agent's tests unsandboxed for a change that needs a human approval."""
+        if self.policy.approval.require_sandbox_for_approval and self._sandbox_warning(plan) is not None:
+            return (
+                "정책(approval.require_sandbox_for_approval)이 켜져 있어, 사람 승인이 필요한 변경의 테스트는 Docker 샌드박스에서만 실행합니다. "
+                "config.yaml 의 project.sandbox 를 설정하거나(`devorch sandbox` 로 점검) 정책에서 이 옵션을 끄세요. 아무것도 실행하지 않았습니다."
+            )
+        return None
+
     def _reassess_from_diff(self, record: TaskRecord) -> None:
         """Raise-only re-assessment against the files the diff really touches (core/analyzer/diff_reassess.py). The first analysis saw only the
         task description; the gates (tests, reviewers, human approval) must not depend on it alone."""
@@ -310,6 +329,7 @@ class ControlPlane:
             "cost_breakdown": [line.model_dump() for line in spend],
             "cost_notes": [n for n in plan.notes if n.startswith("비용")]
             + ["DevOrch가 호출하는 리뷰어 비용만 합산합니다. 구현은 클라이언트(에이전트)가 하므로 그 비용은 포함되지 않습니다(DevOrch가 측정하지 않음)."],
+            "sandbox_warning": self._sandbox_warning(plan),
             "next_step": "작업 트리에서 코드를 구현한 뒤 devorch_request_review 를 호출하세요.",
         }
 
@@ -465,6 +485,9 @@ class ControlPlane:
             return {"task_id": record.id, **blocked}
         if not plan.run_tests:
             return {"task_id": record.id, "status": "skipped", "reason": "이 작업 유형은 테스트가 필요하지 않습니다."}
+        if (problem := self._sandbox_required_problem(plan)) is not None:
+            self._log(record, "run_tests", status="blocked_no_sandbox")
+            return {"task_id": record.id, "status": "blocked", "reason": problem}
 
         self.executor.discard(run)  # always test from a clean worktree
         record.tested_sha = record.tested_tree = None
@@ -526,6 +549,7 @@ class ControlPlane:
                     "reason": "stale: 이전 diff에 대한 승인이라 무효입니다." if approval == "stale" else "이 변경은 사람의 승인이 필요합니다.",
                     "note": "승인 파일이 있지만 서명이 맞지 않아 무시했습니다(DevOrch 밖에서 만들어진 파일). 사람의 승인은 `devorch approve` 로만 유효합니다." if self.store.approval_file_rejected(record.id) else None,
                     "approval_reasons": plan.approval_reasons,
+                    "sandbox_warning": self._sandbox_warning(plan),
                     "how_to_approve": f"사용자가 직접 터미널에서 `devorch approve {record.id}` 를 실행해야 합니다. 에이전트는 승인할 수 없습니다.",
                 }
 

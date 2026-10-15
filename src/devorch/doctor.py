@@ -164,7 +164,13 @@ def run_checks(root: Path, env: Mapping[str, str] | None = None) -> list[Check]:
         else:
             out.append(Check("감사 로그", "ok", f"{rep.total}건, 서명 사슬 {rep.chained}건 이상 없음 (서명 이전 {rep.legacy}건)"))
     sb = load_sandbox(config)
-    if not sb.enabled:
+    if not sb.enabled and policy.approval.require_sandbox_for_approval:
+        out.append(Check(
+            "샌드박스", "warn",
+            "mode=none 인데 정책(approval.require_sandbox_for_approval)이 켜져 있어, 사람 승인이 필요한 변경의 테스트는 실행되지 않고 거부됩니다(승인이 필요 없는 변경은 그대로 동작)",
+            "project.sandbox 로 docker 를 설정하거나(`devorch sandbox` 로 점검) 정책에서 이 옵션을 끄세요.",
+        ))
+    elif not sb.enabled:
         out.append(Check("샌드박스", "info", "mode=none — 테스트가 이 컴퓨터에서 직접 실행됩니다(AI가 쓴 코드가 호스트에서 실행됨). 악의적이거나 신뢰할 수 없는 에이전트라면 그 테스트가 서명 키를 읽어 스스로 승인할 수 있습니다(재현됨)", "신뢰할 수 없는 에이전트와 쓰려면 config.yaml 의 project.sandbox 로 docker 를 설정하세요(docker 에서는 같은 시도가 막힘을 확인)."))
     elif not shutil.which("docker"):
         out.append(Check("샌드박스", "fail", "mode=docker 인데 docker 를 찾을 수 없음 — 테스트가 실패합니다(호스트 실행으로 대체하지 않음)", "docker 를 설치하거나 mode 를 none 으로 바꾸세요."))

@@ -605,6 +605,8 @@ def approve(
     for f in (run.evaluation.warnings if run.evaluation else []):
         typer.echo(f"  [warning {f.severity.value}] ({f.source}) {f.title}")
     typer.echo(f"Tests: {gates['tests']}  {run.test_summary}")
+    if (warning := plane._sandbox_warning(plan)) is not None:  # the human approving should know where the tests ran
+        typer.echo(f"  ※ {warning}")
     if show_diff:
         typer.echo("\n" + record.diff)
 

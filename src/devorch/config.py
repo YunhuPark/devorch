@@ -17,6 +17,9 @@ LEVELS = ("low", "medium", "high", "critical")
 class ApprovalPolicy(BaseModel):
     require_human_approval_at: str = "high"
     require_for_areas: list[str] = Field(default_factory=lambda: ["database", "payment", "permission"])
+    # Off by default: with sandbox mode "none" the tests are the agent's own code running on this PC, and a hostile one can read the signing key and
+    # approve itself (reproduced 2026-10-15). On = tests of changes that need a human approval are refused unless the Docker sandbox is configured.
+    require_sandbox_for_approval: bool = False
 
     @field_validator("require_human_approval_at")
     @classmethod
