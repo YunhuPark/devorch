@@ -12,7 +12,7 @@ import typer
 
 from devorch.cli.app import DevorchTyper
 
-from devorch.audit import AuditLogger
+from devorch.audit import AuditLogger, verify_audit
 from devorch.config import devorch_dir, init_project, load_config, load_policy
 from devorch.core.analyzer.impact_analyzer import analyze_impact
 from devorch.core.analyzer.risk_engine import assess_risk
@@ -438,6 +438,27 @@ def usage(
 
     summary = summarize(load_events(devorch_dir(path) / "audit.jsonl"), days=days, include_mock=include_mock)
     typer.echo(json.dumps(summary, ensure_ascii=False, indent=2, default=str) if as_json else render(summary))
+
+
+@app.command()
+def audit(
+    path: Path = PathOpt,
+    as_json: bool = typer.Option(False, "--json", help="JSON으로 출력"),
+) -> None:
+    """감사 로그(.devorch/audit.jsonl)의 서명 사슬을 검증한다: 중간 수정·삭제·순서 변경·끝부분 잘림을 찾는다 (LLM 호출 없음). 문제가 있으면 종료 코드 1."""
+    rep = verify_audit(devorch_dir(path) / "audit.jsonl")
+    if as_json:
+        typer.echo(json.dumps({"ok": rep.ok, "total": rep.total, "chained": rep.chained, "legacy": rep.legacy, "problems": rep.problems, "warnings": rep.warnings}, ensure_ascii=False, indent=2))
+    else:
+        typer.echo(f"감사 로그: {rep.total}건 (서명 사슬 {rep.chained}건, 서명 도입 이전 {rep.legacy}건)")
+        for w in rep.warnings:
+            typer.echo(f"  [주의] {w}")
+        for p in rep.problems:
+            typer.echo(f"  [문제] {p}")
+        typer.echo("결과: " + ("이상 없음" if rep.ok else "변조 또는 손상이 의심됩니다"))
+        typer.echo("  ※ 이 검사는 '조용한 변조를 알아채는' 것이지 막는 것이 아닙니다. 로그 전체를 지우면 검증할 것이 없고, 서명 키를 읽을 수 있는 코드는 위조할 수 있습니다(Docker 샌드박스 권장).")
+    if not rep.ok:
+        raise typer.Exit(1)
 
 
 def _fmt_usd(x: float | None) -> str:

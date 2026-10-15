@@ -216,6 +216,6 @@ def init_project(root: Path, force: bool = False) -> list[Path]:
 
     gi = d / ".gitignore"
     if not gi.exists():
-        gi.write_text("audit.jsonl\nruns/\n", encoding="utf-8")
+        gi.write_text("audit.jsonl\naudit.head\naudit.jsonl.lock\nruns/\n", encoding="utf-8")
         created.append(gi)
     return created

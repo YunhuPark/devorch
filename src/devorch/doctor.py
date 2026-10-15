@@ -152,6 +152,17 @@ def run_checks(root: Path, env: Mapping[str, str] | None = None) -> list[Check]:
                 else Check("테스트 명령", "warn", f"{cmd} — 실행 파일 {prog!r} 을(를) PATH 에서 찾을 수 없음", "해당 도구를 설치하거나 PATH 에 추가하세요(테스트 단계가 실패합니다).")
             )
 
+    from devorch.audit import verify_audit
+
+    log_path = devorch_dir(root) / "audit.jsonl"
+    if log_path.exists():
+        rep = verify_audit(log_path)
+        if not rep.ok:
+            out.append(Check("감사 로그", "fail", f"변조 또는 손상이 의심됩니다 — {rep.problems[0]}", "`devorch audit` 로 전체 문제를 확인하세요. 원본은 지우지 말고 보관하세요."))
+        elif rep.warnings:
+            out.append(Check("감사 로그", "warn", f"{rep.total}건, 사슬 {rep.chained}건 — {rep.warnings[0]}", ""))
+        else:
+            out.append(Check("감사 로그", "ok", f"{rep.total}건, 서명 사슬 {rep.chained}건 이상 없음 (서명 이전 {rep.legacy}건)"))
     sb = load_sandbox(config)
     if not sb.enabled:
         out.append(Check("샌드박스", "info", "mode=none — 테스트가 이 컴퓨터에서 직접 실행됩니다(AI가 쓴 코드가 호스트에서 실행됨). 악의적이거나 신뢰할 수 없는 에이전트라면 그 테스트가 서명 키를 읽어 스스로 승인할 수 있습니다(재현됨)", "신뢰할 수 없는 에이전트와 쓰려면 config.yaml 의 project.sandbox 로 docker 를 설정하세요(docker 에서는 같은 시도가 막힘을 확인)."))

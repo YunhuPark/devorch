@@ -123,7 +123,7 @@ class Executor:
         gi = devorch_dir(self.root) / ".gitignore"
         gi.parent.mkdir(parents=True, exist_ok=True)
         if not gi.exists():
-            gi.write_text("audit.jsonl\nruns/\nworktrees/\n", encoding="utf-8")
+            gi.write_text("audit.jsonl\naudit.head\naudit.jsonl.lock\nruns/\nworktrees/\n", encoding="utf-8")
 
         branch = self.git.unique_branch(GitManager.branch_name(run.id, run.task_text))
         path = devorch_dir(self.root) / "worktrees" / run.id

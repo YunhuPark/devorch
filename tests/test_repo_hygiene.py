@@ -1,7 +1,8 @@
 """Invisible control characters in source files (a backspace where a regex word boundary was meant, 2026-10-14) break patterns silently."""
 
-import subprocess
 from pathlib import Path
+
+from gitutil import run_git
 
 ROOT = Path(__file__).resolve().parents[1]
 TEXT_SUFFIXES = {".py", ".md", ".yaml", ".yml", ".toml", ".txt", ".json", ".ps1", ".cfg", ".ini"}
@@ -23,7 +24,7 @@ def test_the_detector_finds_a_backspace_in_a_regex_literal(tmp_path):
 
 
 def test_no_tracked_text_file_contains_stray_control_characters():
-    out = subprocess.run(["git", "-C", str(ROOT), "ls-files"], capture_output=True, text=True, encoding="utf-8")
+    out = run_git(ROOT, "ls-files", check=False)  # run_git retries the intermittent Windows "access denied" on launching git.exe
     if out.returncode:  # not a git checkout (e.g. an sdist): nothing to scan
         return
     bad = {}
