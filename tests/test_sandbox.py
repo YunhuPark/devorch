@@ -157,3 +157,43 @@ def test_cli_sandbox_status(tmp_path, shim, monkeypatch):
     assert r.exit_code == 1 and "docker pull" in r.output
     monkeypatch.setenv("SHIM_NO_DAEMON", "1")
     assert runner.invoke(app, ["sandbox", "-p", str(tmp_path)]).exit_code == 1
+
+
+# ---- a refused launch of docker is a failed run, not an exception and never a pass ----------------------------------------------
+async def test_a_refused_docker_launch_is_a_failed_result_after_retries(tmp_path, monkeypatch):
+    import asyncio
+
+    from devorch.core.execution import sandbox as sb
+
+    monkeypatch.setattr(sb.shutil, "which", lambda name: "docker")
+    calls = []
+
+    async def refuse(*args, **kwargs):
+        calls.append(args)
+        raise PermissionError(5, "Access is denied")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", refuse)
+    cfg = sb.SandboxConfig(mode="docker", image="img:1")
+    r = await sb.run_tests_docker("python -m pytest -q", tmp_path, ["python -m pytest"], 10, cfg)
+    assert not r.ok and "실행하지 못함" in r.reason and len(calls) == sb.LAUNCH_RETRIES
+
+
+async def test_one_refused_docker_launch_is_retried_and_then_works(tmp_path, monkeypatch):
+    import asyncio
+
+    from devorch.core.execution import sandbox as sb
+
+    monkeypatch.setattr(sb.shutil, "which", lambda name: "docker")
+    real = asyncio.create_subprocess_exec
+    state = {"n": 0}
+
+    async def flaky(*args, **kwargs):
+        state["n"] += 1
+        if state["n"] == 1:
+            raise PermissionError(5, "Access is denied")
+        return await real(sys.executable, "-c", "print('ran')", **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", flaky)
+    cfg = sb.SandboxConfig(mode="docker", image="img:1")
+    r = await sb.run_tests_docker("python -m pytest -q", tmp_path, ["python -m pytest"], 30, cfg)
+    assert r.ok and "ran" in r.output_tail and state["n"] == 2

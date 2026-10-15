@@ -73,7 +73,8 @@ async def test_the_container_can_read_and_write_the_bind_mounted_directory(tmp_p
 
 
 async def test_memory_limit_kills_a_test_that_allocates_too_much(tmp_path):
-    d = workdir(tmp_path, {"test_mem.py": "def test_mem():\n    x = bytearray(2 * 1024 * 1024 * 1024)\n    assert x\n"}, isolation=False)
+    # b"x" * n WRITES every page; bytearray(n) would only reserve lazily-zeroed memory that never counts against the limit (it did not on Linux)
+    d = workdir(tmp_path, {"test_mem.py": "def test_mem():\n    x = b'x' * (2 * 1024 * 1024 * 1024)\n    assert x\n"}, isolation=False)
     r = await run_tests_docker(CMD + " test_mem.py", d, ALLOWED, 120, CFG)
     assert not r.ok and r.exit_code == 137  # killed by the OOM killer
 

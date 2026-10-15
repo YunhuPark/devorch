@@ -59,6 +59,7 @@ def load_sandbox(config: dict) -> SandboxConfig:
 
 
 FALLBACK_UID_GID = (1000, 1000)
+LAUNCH_RETRIES = 3
 
 
 def container_user() -> tuple[int, int]:
@@ -133,9 +134,22 @@ async def run_tests_docker(
     name = f"devorch-{uuid.uuid4().hex[:12]}"
     uid, gid = container_user()
     args = build_docker_args(cfg, name, cwd, command, uid, gid)
-    proc = await asyncio.create_subprocess_exec(
-        *args, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
-    )
+    proc = None
+    for attempt in range(LAUNCH_RETRIES):
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *args, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+            )
+            break
+        except PermissionError as e:
+            # Windows intermittently refuses to START an executable (seen for git.exe and docker.exe, cause unknown). A refused launch means
+            # nothing ran, so retrying repeats no side effect; after the last attempt it is a failed run, never a pass and never an exception.
+            if attempt == LAUNCH_RETRIES - 1:
+                return TestResult(False, command, None, "", f"[docker] docker 를 실행하지 못함(접근 거부): {e}")
+            await asyncio.sleep(0.2 * (attempt + 1))
+        except OSError as e:
+            return TestResult(False, command, None, "", f"[docker] docker 를 실행하지 못함: {e}")
+    assert proc is not None
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
     except asyncio.TimeoutError:
