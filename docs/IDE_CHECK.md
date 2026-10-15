@@ -1,5 +1,7 @@
 # IDE 에서 승인 흐름 직접 확인하기 (약 20분)
 
+> **결과 (2026-10-15, 사용자가 IDE 에서 직접 1~4단계 확인):** 서버 연결(도구 8개, 승인 도구 없음) → 에이전트가 `approval_required` 에서 멈춤 → 실제 터미널에서 승인 → `committed`(별도 브랜치, main 불변). 남은 것: 허용 창이 뜨는 모드의 화면, 5단계(IDE 에서 직접). 입력창 모드가 `Auto` 이면 허용 창이 안 뜨는 것이 정상일 수 있습니다. 승인 대화상자 없이 서버가 바로 연결된 이유는 확인하지 못했습니다.
+
 Written for: whoever tries DevOrch for the first time in an IDE (the project owner, later a tester). 비용: 가짜(mock) 리뷰어라 API 비용 0원. Claude Code 사용량만 조금 듭니다.
 
 준비: `C:\Users\qkrdb\Documents\devorch-playground` (일부러 `add()` 가 뺄셈을 하는 작은 저장소, DevOrch MCP 서버가 `.mcp.json` 으로 연결돼 있음).
