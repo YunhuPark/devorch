@@ -161,6 +161,34 @@ class GitManager:
         status = self._git(["status", "--porcelain"], cwd=worktree).stdout.splitlines()
         return [line[3:] for line in status]
 
+    def expected_tree(self, worktree: Path, diff: str) -> str:
+        """Tree of (the worktree's HEAD + ``diff``), built in a throw-away index: what the reviewed change should look like. Touches no file."""
+        with tempfile.TemporaryDirectory() as td:
+            env = {**os.environ, "GIT_INDEX_FILE": str(Path(td) / "index")}
+            self._git(["read-tree", "HEAD"], cwd=worktree, env=env)
+            self._git(["apply", "--cached", "--whitespace=nowarn", "-"], cwd=worktree, env=env, input_text=diff)
+            return self._git(["write-tree"], cwd=worktree, env=env).stdout.strip()
+
+    def tracked_tree(self, worktree: Path, expected: str) -> str:
+        """Tree of the worktree restricted to the paths that exist in ``expected``: their CURRENT content (``git add -u``), untracked extras ignored."""
+        with tempfile.TemporaryDirectory() as td:
+            env = {**os.environ, "GIT_INDEX_FILE": str(Path(td) / "index")}
+            self._git(["read-tree", expected], cwd=worktree, env=env)
+            self._git(["add", "-u"], cwd=worktree, env=env)
+            return self._git(["write-tree"], cwd=worktree, env=env).stdout.strip()
+
+    def changed_paths(self, tree_a: str, tree_b: str) -> list[str]:
+        out = self._git(["diff-tree", "-r", "--name-only", tree_a, tree_b]).stdout
+        return [line for line in out.splitlines() if line.strip()]
+
+    def reset_clean(self, worktree: Path) -> None:
+        """Throw away everything in a LINKED worktree that is not committed (edits and untracked files). Refuses anything that is not one."""
+        wt = Path(worktree).resolve()
+        if wt == self.root.resolve() or not (wt / ".git").is_file():
+            raise GitError(f"{wt} 은 DevOrch 가 만든 임시 worktree 가 아니라 정리하지 않음")
+        self._git(["reset", "--hard", "-q", "HEAD"], cwd=wt)
+        self._git(["clean", "-fdxq"], cwd=wt)
+
     def tree_hash(self, worktree: Path) -> str:
         """Hash of the FULL content of ``worktree`` (tracked and untracked files, honouring .gitignore), computed with a throw-away index
         so nothing in the worktree is staged. Equal hash = identical content."""

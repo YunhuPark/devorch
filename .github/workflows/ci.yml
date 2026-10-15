@@ -32,6 +32,28 @@ jobs:
       - run: python -m pip install -e ".[dev,llm]"
       - run: python -m pytest -q -p no:cacheprovider
 
+  # The Docker sandbox against a REAL daemon (Linux runners have Docker). DEVORCH_REQUIRE_DOCKER makes a missing daemon a failure, not a skip.
+  docker-sandbox:
+    name: docker sandbox (ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DEVORCH_REQUIRE_DOCKER: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Git identity (tests create commits)
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name ci
+          git config --global init.defaultBranch main
+      - run: docker build -t devorch-eval:py312 tests/docker
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e ".[dev,llm]"
+      - run: python -m pytest -q -p no:cacheprovider tests/test_docker_sandbox.py -rs
+
   # A user installs the package, not the source tree: check that the built wheel works from an empty directory
   # (package data such as the benchmark cases included, no API keys, nothing but `--mock`).
   clean-install:

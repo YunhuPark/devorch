@@ -174,3 +174,69 @@ async def test_files_the_test_run_itself_creates_do_not_break_the_check(repo):
     plane.store.save_approval(Approval(task_id=tid, diff_sha=plane._load(tid).diff_sha, approved=True, via="cli"))
     assert plane._load(tid).tested_tree
     assert (await plane.apply_changes(tid))["status"] == "committed"
+
+
+# ---- what is committed is the REVIEWED diff, not what the test run left in the worktree ---------------------------------------
+SNEAKY = (
+    "import pathlib\n"
+    "\n"
+    "def test_sneaky():\n"
+    "    pathlib.Path('calc.py').write_text('def add(a, b):\\n    return 42  # injected by a test\\n')\n"
+    "    pathlib.Path('dropped_by_test.txt').write_text('x')\n"
+)
+
+
+def tree_files(repo, branch):
+    return sorted(run_git(repo, "ls-tree", "-r", "--name-only", branch).stdout.split())
+
+
+async def test_a_test_that_rewrites_a_reviewed_file_does_not_count_as_passing(repo):
+    plane = make_plane(repo)
+    a = plane.analyze_task(PAYMENT)
+    (repo / "calc.py").write_text(GOOD, encoding="utf-8")
+    (repo / "test_zz_sneaky.py").write_text(SNEAKY, encoding="utf-8")  # runs after test_calc.py and rewrites calc.py
+    await plane.request_review(a["task_id"])
+    t = await plane.run_tests(a["task_id"])
+    assert t["status"] == "failed" and "검토된 파일이 바뀌었" in t["summary"] and "calc.py" in t["summary"]
+    assert (await plane.apply_changes(a["task_id"]))["status"] == "blocked"
+
+
+async def test_the_commit_holds_exactly_the_reviewed_files_without_test_artifacts(repo):
+    plane = make_plane(repo)
+    tid = await reach_tested(plane, repo)
+    plane.store.save_approval(Approval(task_id=tid, diff_sha=plane._load(tid).diff_sha, approved=True, via="cli"))
+    r = await plane.apply_changes(tid)
+    assert r["status"] == "committed"
+    assert tree_files(repo, r["branch"]) == ["calc.py", "test_calc.py"]  # no __pycache__, no .pytest_cache
+    assert run_git(repo, "show", f"{r['branch']}:calc.py").stdout == GOOD
+
+
+async def test_commit_rebuilds_from_the_reviewed_diff_even_if_the_worktree_is_edited_at_the_last_moment(repo):
+    """Executor level, past the service's own checks: whatever is in the worktree at commit time, only the reviewed diff is committed."""
+    from devorch.core.orchestrator.engine import WorkflowRun
+
+    pol = Policy(allowed_commands=[PYTEST_CMD])
+    ex = Executor(repo, pol, test_command=PYTEST_CMD)
+    (repo / "calc.py").write_text(GOOD, encoding="utf-8")
+    diff = ex.git.working_diff()
+    run = WorkflowRun(task_text="calc.py 수정", implementation=diff)
+    await ex.apply(run)
+    wt = Path(run.worktree)
+    (wt / "calc.py").write_text("def add(a, b):\n    return 42  # tampered at the last moment\n", encoding="utf-8")
+    (wt / "backdoor.py").write_text("print('x')\n", encoding="utf-8")
+    (wt / "__pycache__").mkdir()
+    (wt / "__pycache__" / "x.pyc").write_bytes(b"\0")
+    await ex.commit(run)
+    assert tree_files(repo, run.branch) == ["calc.py", "test_calc.py"]
+    assert run_git(repo, "show", f"{run.branch}:calc.py").stdout == GOOD
+
+
+def test_reset_clean_refuses_to_touch_anything_but_a_linked_worktree(repo):
+    from devorch.git.manager import GitError, GitManager
+
+    (repo / "precious.txt").write_text("keep me", encoding="utf-8")
+    with pytest.raises(GitError):
+        GitManager(repo).reset_clean(repo)  # the main repository itself
+    with pytest.raises(GitError):
+        GitManager(repo).reset_clean(repo / "no" / "such" / "dir")
+    assert (repo / "precious.txt").read_text(encoding="utf-8") == "keep me"

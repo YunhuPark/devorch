@@ -64,8 +64,9 @@ FALLBACK_UID_GID = (1000, 1000)
 def container_user() -> tuple[int, int]:
     """uid:gid the container runs as — the host user's where the OS has one, never root.
 
-    Windows has no uid/gid, so a fixed unprivileged id is used. UNVERIFIED: whether bind mounts of a
-    Windows worktree are writable for that id under Docker Desktop has not been tried.
+    Windows has no uid/gid, so a fixed unprivileged id is used. Verified 2026-10-15 on Docker Desktop for Windows (WSL2 backend): that id
+    reads files created on the host and writes files that appear on the host (tests/test_docker_sandbox.py). Other setups (Docker on macOS,
+    rootless Docker, network drives) have not been tried.
     """
     if hasattr(os, "getuid") and hasattr(os, "getgid"):
         return os.getuid(), os.getgid()

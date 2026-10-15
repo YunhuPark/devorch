@@ -164,9 +164,28 @@ class Executor:
             result = await run_tests(command, path, self.policy.allowed_commands, timeout, self.blocked_env)
         run.test_summary = result.summary()
         run.test_output = result.output_tail
+        if result.ok:
+            touched = self._reviewed_files_changed(path, run)
+            if touched:
+                # test code is the agent's own code: a passing run on files the test itself rewrote proves nothing about the reviewed change
+                shown = ", ".join(touched[:5]) + (f" 외 {len(touched) - 5}개" if len(touched) > 5 else "")
+                run.test_summary = f"테스트 실행 중에 검토된 파일이 바뀌었습니다({shown}) — 통과로 인정하지 않음"
+                run.notes.append(run.test_summary)
+                return False
         if not result.ok:
             run.notes.append(f"테스트 실패 — 확인용으로 worktree 보존: {path} (branch {run.branch}, 커밋 없음)")
         return result.ok
+
+    def _reviewed_files_changed(self, path: Path, run: "WorkflowRun") -> list[str]:
+        """Paths of the reviewed change whose content differs from the reviewed snapshot right now (untracked artifacts do not count)."""
+        diff = extract_diff(run.implementation)
+        if diff is None:
+            return []
+        try:
+            expected = self.git.expected_tree(path, diff)
+            return self.git.changed_paths(expected, self.git.tracked_tree(path, expected))
+        except GitError:
+            return ["(확인하지 못함)"]  # cannot tell: do not vouch for it
 
     # ------------------------------------------------------------- commit
     def tree_hash(self, run: "WorkflowRun") -> str | None:
@@ -184,6 +203,16 @@ class Executor:
         path = self._worktree(run)
         if path is None:
             raise ExecutionError("커밋할 worktree가 없음")
+        # Commit exactly the reviewed change, not whatever the test run left behind (compiled caches, files a test wrote or rewrote):
+        # rebuild the worktree from the base commit and re-apply the reviewed diff.
+        diff = extract_diff(run.implementation)
+        if diff is None:
+            raise ExecutionError("구현 결과에서 unified diff를 찾지 못함")
+        try:
+            self.git.reset_clean(path)
+            self.git.apply_diff(path, diff)
+        except GitError as e:
+            raise ExecutionError(f"검토된 diff 로 커밋 내용을 다시 만들지 못함: {e}") from e
         title = run.task_text.strip().splitlines()[0][:60]
         kind = {"feature": "feat", "bugfix": "fix", "refactor": "refactor", "test": "test", "docs": "docs"}.get(
             run.analysis.task_type.value if run.analysis else "", "chore"
