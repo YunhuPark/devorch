@@ -37,6 +37,7 @@ from devorch.models import Finding, RiskLevel
 from devorch.providers.base import ProviderRegistry
 from devorch.providers.factory import build_registry
 from devorch.providers.mock import MockProvider
+from devorch.security.path_guard import resolve_inside
 from devorch.security.secret_redactor import has_secret_literal, redact
 from devorch.store import TaskRecord, TaskStore
 
@@ -85,6 +86,12 @@ def approve_command(root: Path, task_id: str) -> str:
     py = sys.executable
     prefix = "& " if os.name == "nt" else ""  # PowerShell needs the call operator to run a quoted path
     return f'{prefix}"{py}" -m devorch approve {task_id} -p "{root}"'
+
+
+def finish_command(root: Path, task_id: str) -> str:
+    """Same shape as approve_command: a command the user can paste (this interpreter, -p, PowerShell call operator on Windows)."""
+    prefix = "& " if os.name == "nt" else ""
+    return f'{prefix}"{sys.executable}" -m devorch finish {task_id} -p "{root}"'
 
 
 def sha_of(diff: str) -> str:
@@ -584,8 +591,53 @@ class ControlPlane:
             "branch": run.branch,
             "commit": run.commit,
             "note": "검토·테스트된 diff가 별도 브랜치에 커밋되었습니다. 현재 브랜치와 작업 트리는 변경되지 않았습니다. "
-            "사용자가 브랜치를 확인한 뒤 직접 merge 하세요(작업 트리의 미커밋 수정은 필요하면 되돌리세요).",
+            "사용자가 브랜치를 확인한 뒤 직접 merge 하세요. 작업 트리에 남은 에이전트의 미커밋 수정은 merge 를 막으므로, 사용자가 `how_to_finish` 명령으로 정리할 수 있습니다 "
+            "(커밋된 내용과 정확히 같은 파일만 되돌리고, 사용자가 더 고친 파일이 있으면 아무것도 건드리지 않습니다).",
+            "how_to_finish": finish_command(self.root, record.id)
+            + ("   [PowerShell 기준 — cmd.exe 에서는 맨 앞의 '& ' 를 빼세요]" if os.name == "nt" else ""),
+            "merge_command": f"git merge {run.branch}",
         }
+
+    # ------------------------------------------------------------------ finish
+    def finish_preview(self, task_id: str) -> dict[str, Any]:
+        """What ``finish`` would do, without changing anything. Only a COMMITTED task can be finished; a file is only ever discarded from the working
+        tree when its content is exactly what DevOrch committed to the task branch (then nothing is lost: the branch has it)."""
+        record = self._load(task_id)
+        run = record.run
+        if not (run.commit and run.branch):
+            return {"task_id": record.id, "status": "blocked", "reason": "이 작업은 아직 커밋되지 않았습니다. 정리할 것이 없습니다."}
+        git = self.executor.git
+        restore: list[dict[str, Any]] = []
+        already_clean: list[str] = []
+        changed_since: list[str] = []
+        for rel in validate_diff(record.diff):
+            resolve_inside(self.root, rel)
+            working, head, branch = git.file_hash(rel), git.blob_hash("HEAD", rel), git.blob_hash(run.branch, rel)
+            if working == head:
+                already_clean.append(rel)  # the working tree already matches HEAD for this path
+            elif working == branch:
+                restore.append({"path": rel, "in_head": head is not None})
+            else:
+                changed_since.append(rel)  # differs from what was committed: someone edited it after DevOrch's commit
+        status = "blocked" if changed_since else ("nothing_to_clean" if not restore else "ready")
+        out: dict[str, Any] = {"task_id": record.id, "status": status, "branch": run.branch, "will_restore": [r["path"] for r in restore],
+                               "already_clean": already_clean, "changed_since_commit": changed_since, "merge_command": f"git merge {run.branch}"}
+        if changed_since:
+            out["reason"] = "커밋된 내용과 다른 파일이 있어(그 뒤에 수정됨) 아무것도 건드리지 않습니다: " + ", ".join(changed_since)
+        out["_restore"] = restore
+        return out
+
+    def finish(self, task_id: str) -> dict[str, Any]:
+        """Discard the agent's leftover uncommitted edits from the working tree (see finish_preview for the safety rule). All or nothing."""
+        plan = self.finish_preview(task_id)
+        restore = plan.pop("_restore", [])
+        if plan["status"] != "ready":
+            return plan
+        record = self._load(task_id)
+        for item in restore:
+            self.executor.git.discard_working_copy(item["path"], item["in_head"])
+        self._log(record, "finish", restored=[r["path"] for r in restore], branch=plan["branch"])
+        return {**plan, "status": "cleaned", "restored": [r["path"] for r in restore]}
 
     # ---------------------------------------------------------------- resources
     def policy_summary(self) -> dict[str, Any]:

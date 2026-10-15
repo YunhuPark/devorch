@@ -181,6 +181,27 @@ class GitManager:
         out = self._git(["diff-tree", "-r", "--name-only", tree_a, tree_b]).stdout
         return [line for line in out.splitlines() if line.strip()]
 
+    def blob_hash(self, rev: str, rel_path: str) -> str | None:
+        """Hash of ``rel_path`` as stored in ``rev`` (a branch, HEAD, ...); None if it does not exist there."""
+        proc = self._git(["rev-parse", "--verify", "-q", f"{rev}:{rel_path}"], check=False)
+        return proc.stdout.strip() or None if proc.returncode == 0 else None
+
+    def file_hash(self, rel_path: str) -> str | None:
+        """Hash git WOULD store for the file in the main working tree right now (same line-ending rules as ``git add``); None if there is no such file."""
+        if not (self.root / rel_path).is_file():
+            return None
+        return self._git(["hash-object", "--", rel_path]).stdout.strip() or None
+
+    def discard_working_copy(self, rel_path: str, in_head: bool) -> None:
+        """Put one path of the main working tree back to HEAD (a file HEAD does not have is removed). Callers must have checked what is being thrown away."""
+        if in_head:
+            self._git(["checkout", "HEAD", "--", rel_path])
+            return
+        self._git(["rm", "-f", "-q", "--ignore-unmatch", "--", rel_path], check=False)  # also drops it from the index if it was staged
+        target = self.root / rel_path
+        if target.is_file():
+            target.unlink()
+
     def reset_clean(self, worktree: Path) -> None:
         """Throw away everything in a LINKED worktree that is not committed (edits and untracked files). Refuses anything that is not one."""
         wt = Path(worktree).resolve()

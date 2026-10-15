@@ -83,6 +83,7 @@ diff 추출 → 경로 검증 → git worktree add(HEAD 기준) → git apply �
 ```
 
 사용자의 현재 브랜치·작업 트리는 건드리지 않고 `devorch/<run>-<slug>` 브랜치만 만듭니다(merge는 직접).
+커밋 뒤에도 에이전트가 고쳐 둔 미커밋 수정은 작업 트리에 남아 `git merge` 를 막습니다. 응답의 `how_to_finish` 명령(`devorch finish <task_id>`)을 터미널에서 실행하면, **브랜치에 커밋된 내용과 정확히 같은 파일만** 작업 트리에서 되돌립니다(내용은 브랜치에 있으므로 잃는 것이 없음). 그 뒤에 직접 더 고친 파일이 하나라도 있으면 아무것도 건드리지 않습니다. 에이전트용 도구는 없습니다(사람이 터미널에서 확인 후 실행, `--yes` 로 질문 생략).
 테스트가 실패하면 커밋하지 않고 확인용 worktree를 남깁니다. 테스트 명령이 없으면 실패하며(`--no-tests`로 명시적 생략),
 테스트 명령은 `config.yaml`의 `project.test_command` 또는 자동 감지(npm/pytest/mvn/gradle)를 씁니다.
 
@@ -125,7 +126,7 @@ src/devorch/
 ├── cli/main.py
 ├── config.py  audit.py  models.py
 bench/          # (src/devorch/bench) 케이스·채점·러너·리포트, cases/*.yaml
-tests/              # 561 tests + 2 skip (Windows에서 symlink 권한이 없으면 skip)
+tests/              # 578 tests + 2 skip (Windows에서 symlink 권한이 없으면 skip)
 examples/demo-spring/   # 영향 분석 시연용 작은 Java 프로젝트
 ```
 

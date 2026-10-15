@@ -27,7 +27,8 @@ from devorch.core.router.model_router import plan_routing
 from devorch.providers.base import ProviderRegistry
 from devorch.providers.factory import build_registry
 from devorch.providers.mock import MockProvider
-from devorch.service import ControlPlane
+from devorch.service import ControlPlane, ControlPlaneError
+from devorch.git.manager import GitError
 from devorch.store import Approval, StoreError
 
 app = DevorchTyper(help="DevOrch — AI Development Control Plane", no_args_is_help=True, add_completion=False)
@@ -614,6 +615,43 @@ def approve(
     plane.store.save_approval(Approval(task_id=task_id, diff_sha=record.diff_sha or "", approved=approved, via="cli"))
     plane.audit.log(task_id, "approval", {"approved": approved, "diff_sha": record.diff_sha, "via": "cli"})
     typer.echo("승인됨. 에이전트가 devorch_apply_changes 를 호출하면 브랜치에 커밋됩니다." if approved else "거부로 기록했습니다.")
+
+
+@app.command()
+def finish(
+    task_id: str = typer.Argument(..., help="커밋까지 끝난 task id"),
+    path: Path = PathOpt,
+    yes: bool = typer.Option(False, "--yes", "-y", help="확인 질문 없이 정리"),
+) -> None:
+    """커밋이 끝난 뒤 작업 트리에 남은 에이전트의 미커밋 수정을 정리해 `git merge` 가 막히지 않게 한다.
+
+    커밋된 내용과 정확히 같은 파일만 되돌린다. 그 뒤에 직접 더 고친 파일이 하나라도 있으면 아무것도 건드리지 않는다."""
+    if not yes and not _is_interactive():
+        typer.echo("대화형 터미널이 아니라 확인을 받을 수 없습니다. 직접 터미널에서 실행하거나 --yes 를 붙이세요.", err=True)
+        raise typer.Exit(2)
+    plane = ControlPlane.from_project(path, mock=True)
+    try:
+        plan = plane.finish_preview(task_id)
+    except (StoreError, GitError, ControlPlaneError) as e:
+        typer.echo(f"오류: {e}", err=True)
+        raise typer.Exit(2)
+    if plan["status"] == "blocked":
+        typer.echo(plan["reason"], err=True)
+        raise typer.Exit(1)
+    if plan["status"] == "nothing_to_clean":
+        typer.echo(f"정리할 것이 없습니다. 바로 merge 하세요: {plan['merge_command']}")
+        return
+    typer.echo(f"브랜치 {plan['branch']} 에 이미 커밋된 내용과 같아서 작업 트리에서 되돌릴 파일:")
+    for rel in plan["will_restore"]:
+        typer.echo(f"  - {rel}")
+    if not yes and not typer.confirm("되돌릴까요?"):
+        typer.echo("아무것도 바꾸지 않았습니다.")
+        raise typer.Exit(1)
+    result = plane.finish(task_id)
+    if result["status"] != "cleaned":  # changed between the preview and now
+        typer.echo(result.get("reason", "정리하지 못했습니다."), err=True)
+        raise typer.Exit(1)
+    typer.echo(f"정리했습니다. 이제 merge 할 수 있습니다: {result['merge_command']}")
 
 
 if __name__ == "__main__":
