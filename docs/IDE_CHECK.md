@@ -7,6 +7,13 @@ Written for: whoever tries DevOrch for the first time in an IDE (the project own
 준비: `C:\Users\qkrdb\Documents\devorch-playground` (일부러 `add()` 가 뺄셈을 하는 작은 저장소, DevOrch MCP 서버가 `.mcp.json` 으로 연결돼 있음).
 확인하려는 것: **에이전트가 승인이 필요한 변경에서 멈추고, 사람이 터미널에서 승인한 뒤에야 커밋되는가.**
 
+**다시 시연하려면 먼저 처음 상태로 되돌립니다**(devorch 브랜치, 작업·감사 기록, 미커밋 수정을 지움 — `-Yes` 없이 실행하면 지울 목록만 보여 줍니다):
+```powershell
+powershell -File C:\Users\qkrdb\Documents\devorch\tools\demo\reset_playground.ps1 -Path C:\Users\qkrdb\Documents\devorch-playground
+# 목록을 확인했으면 같은 명령 끝에 -Yes
+```
+되돌린 뒤 처음 쓰면 `.devorch/.gitignore` 가 한 줄 수정됐다고 `git status` 에 뜰 수 있습니다(이전 버전 파일에 새 항목을 덧붙이는 정상 동작).
+
 ## 1. 연결 (IDE)
 1. IDE 에서 위 폴더를 엽니다.
 2. Claude Code 가 `.mcp.json` 의 `devorch` 서버를 쓸지 묻습니다 → **이 서버만 사용**을 고릅니다. (화면에 뭐라고 나왔는지 기록)
