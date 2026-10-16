@@ -4,6 +4,8 @@ This proves the transport and the process boundary work on this OS; it does NOT 
 client application (Claude Code, Cursor) can connect — that still has to be tried in that application.
 """
 
+import os
+import subprocess
 import sys
 
 import pytest
@@ -11,6 +13,8 @@ import yaml
 from gitutil import run_git
 from mcp.client import Client
 from mcp.client.stdio import StdioServerParameters
+
+from devorch.service import finish_command
 
 PYTEST_CMD = f"{sys.executable} -m pytest -q"
 EXPECTED_TOOLS = {
@@ -63,6 +67,15 @@ async def test_real_stdio_process_lists_tools_and_runs_the_full_low_risk_flow(re
     assert run_git(repo, "branch", "--show-current").stdout.strip() == "main"  # the user's branch is untouched
     assert run_git(repo, "show", f"{done['branch']}:calc.py").stdout.strip() == "def add(a, b):\n    return a + b".strip()
     assert (repo / "calc.py").read_text(encoding="utf-8") == "def add(a, b):\n    return a + b\n"
+
+    # What the user is handed after the commit comes out of the REAL server process too (a stale server once answered without it) and works.
+    assert finish_command(repo, tid) in done["how_to_finish"] and done["merge_command"] == f"git merge {done['branch']}"
+    # The client hands the server child almost no environment, so it signed with the default key file; the user's terminal has that default too.
+    env = {k: v for k, v in os.environ.items() if k != "DEVORCH_KEY_FILE"}
+    fin = subprocess.run([sys.executable, "-m", "devorch", "finish", tid, "-p", str(repo), "--yes"], capture_output=True, text=True, encoding="utf-8", env=env)
+    assert fin.returncode == 0, fin.stderr
+    assert "calc.py" not in run_git(repo, "status", "--porcelain").stdout  # the agent's leftover edit is gone
+    assert run_git(repo, "merge", "--no-edit", done["branch"], check=False).returncode == 0
 
 
 async def test_real_stdio_high_risk_apply_is_refused_without_a_human_approval(repo):
