@@ -69,7 +69,7 @@ DevOrch가 통제하려는 에이전트는 보통 프로젝트 폴더에 파일�
 | Provider 인터페이스 + MockProvider | ✅ |
 | 실제 LLM Provider 어댑터 (Anthropic Messages / OpenAI Responses / Gemini generate_content) | ✅ 단위 테스트 완료. 실제 호출 성공 확인: Anthropic(`claude-sonnet-5-5`, 11회), OpenAI(`gpt-6-sol`)·Gemini(`gemini-3.6-flash`)(작은 벤치마크 8회). **미검증:** OpenAI 추론 토큰이 `usage.output_tokens`에 포함되는지(청구서와 대조 필요), 실패·재시도 경로의 실제 동작 |
 | 코드 적용기(임시 git worktree) / 테스트 러너(allowlist) / 브랜치 커밋 — `run --apply` | ✅ 임시 git 저장소 E2E 테스트 완료 (실제 LLM이 만든 diff로는 미검증) |
-| MCP 서버 (stdio, 도구 8개 + 리소스 3개), `devorch approve` / `tasks` | ✅ 인메모리 테스트 + **Windows에서 실제 stdio 하위 프로세스로** 분석→리뷰→테스트→브랜치 커밋, 승인 필요 작업의 거부까지 검증(`tests/test_mcp_stdio.py`, mock provider). **Claude Code 등 실제 클라이언트 연결은 미검증** |
+| MCP 서버 (stdio, 도구 8개 + 리소스 3개), `devorch approve` / `tasks` | ✅ 인메모리 테스트 + **Windows에서 실제 stdio 하위 프로세스로** 분석→리뷰→테스트→브랜치 커밋, 승인 필요 작업의 거부까지 검증(`tests/test_mcp_stdio.py`, mock provider). **Claude Code(헤드리스 + 사용자가 IDE 에서 직접)로는 승인→커밋→`devorch finish`→merge 까지 확인, 그 밖의 클라이언트(Cursor 등)는 미검증** |
 | Benchmark (`devorch bench`): 시드 결함 16케이스(결함 13 + 대조군 4), Wilson 신뢰구간, 쌍체 부호검정 | ✅ 하네스·채점은 mock으로 검증. 실제 LLM 실행(2026-10-08, 당시 11케이스): Claude 단일 리뷰어 1회, GPT·Gemini single 대 multi를 3회 반복(132호출, 약 $0.49). 결함 단위 탐지 single 8/9 [56–98%] 대 multi 9/9 [70–100%], 차이는 c08 하나(쌍체 p=1.000)라 **multi가 낫다고 말할 수 없음**. 이후 아키텍처 케이스 4개와 대조군 1개를 추가(2026-10-09)하고 16케이스로 4개 모드를 1회씩 실행(96호출, $0.347): 결함 단위 탐지 multi 12/13($0.175), single 10/13($0.057), `solo:gemini:review` 12/13($0.061), `solo:openai:architecture` 12/13($0.054). 쌍체 p는 0.5~1.0이라 **통계적으로 차이가 확인되지 않음**. 정규식 판정의 한계(c14는 single이 실제로 지적했으나 미탐지로 집계), c15는 4개 모드 모두 다른 문제(TTL)를 지적해 비교에 쓸 수 없음, c16 대조군은 자리표시 데이터 때문에 완전히 깨끗하지 않음 — 각 케이스 notes 참고. LLM 판정기(Claude, 52호출 $0.131)로 재판정하면 정규식과 51/52 일치, 엇갈린 1건(c14 single, 판정기는 탐지) → single 11/13, 나머지는 동일, 쌍체 p=1.0 (판정기는 검증되지 않았고 사람이 읽은 판단과 같은 계열 모델이라 독립 확인이 아님). 비용 차이(multi가 다른 구성의 약 3배)는 안정적이나 탐지 차이는 결함 1개 |
 | Docker 샌드박스 (테스트 단계, `devorch sandbox`) | ✅ **실제 Docker(Docker Desktop, Windows/WSL2)로 검증** — 비root·네트워크 없음·호스트 환경변수/경로/서명 키 접근 불가·메모리·pid 제한·타임아웃 정리·이미지 없으면 실패(호스트 대체 없음), 컨테이너 사용자가 Windows 폴더에 읽기/쓰기 가능. 자동 테스트(`tests/test_docker_sandbox.py`)와 CI(ubuntu)가 계속 확인. 다른 환경(macOS, rootless, 네트워크 드라이브)은 미검증 |
 | Dashboard (`devorch dashboard`, 읽기 전용 로컬 웹 UI) | ✅ API 테스트 + 실제 Chromium 렌더링/XSS 확인 |
@@ -172,6 +172,8 @@ claude mcp add devorch -- devorch mcp -p /path/to/project
 ② 기존 테스트가 실패하는 상태에서는 `apply_changes` 로 가지 못하고 에이전트가 그대로 보고했으며, ③ CRITICAL 작업은 `approval_required` 에서 멈춰 사람에게 `devorch approve <id>` 를 안내했습니다
 (승인 파일 없음, 추가 커밋 0, 비대화형 `approve` 는 거부). **검증하지 못한 것:** IDE(앱)의 MCP 서버 승인 화면, `.mcp.json` 프로젝트 범위 서버의 승인 흐름(헤드리스에서는 설정을 직접 넘김),
 사람이 승인한 뒤 에이전트가 다시 `apply_changes` 를 호출하는 뒷부분(승인은 설계상 TTY 가 필요해 자동화하지 않음), 실제 리뷰어(mock 아님)와 함께 쓰는 경우.
+**그 뒤 추가 검증(2026-10-15~17):** 위 '검증하지 못한 것' 중 두 가지가 확인됐습니다. ① 사람이 승인한 뒤 같은 세션의 에이전트가 `apply_changes` 로 이어서 커밋(헤드리스에서 사람 승인 단계만 `approve` 의 실제 코드로 대신했고, 사용자가 진짜 IDE 터미널에서 직접 승인한 흐름은 Antigravity IDE + Claude Code 확장에서 두 번 이상 확인). ② `.mcp.json` 프로젝트 범위 서버가 IDE 에서 연결됨(도구 8개, 승인 도구 없음). 에이전트에게 승인 파일을 직접 만들라고 명시적으로 시켰을 때 거절했고(헤드리스), 위조한 승인 파일은 서버가 무시했습니다. 커밋 뒤에는 응답의 `how_to_finish` 를 에이전트가 그대로 전달했고, `devorch finish` → `git merge` 가 IDE 에서 동작했습니다.
+**여전히 미검증:** IDE 에서 승인 파일 직접 만들기 지시(5단계), 도구 허용 창이 뜨는 모드의 화면, 실제 리뷰어(mock 아님)와 함께한 IDE 흐름, Claude Code 이외의 클라이언트. 자세한 기록은 `HANDOFF.md`, 절차는 `docs/IDE_CHECK.md`.
 셸·파일 쓰기 권한이 있는 에이전트는 승인 파일을 직접 쓸 수 있다는 기존 한계는 그대로입니다(위 시험은 Bash·Write 를 막은 상태).
 
 에이전트(Claude)가 따르는 흐름 — 코드는 **에이전트가 자기 작업 트리에서 작성**하고, DevOrch는 무엇이 반영될 수 있는지만 통제합니다.
