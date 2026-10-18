@@ -13,6 +13,7 @@ from pathlib import Path
 import yaml
 
 from devorch.config import LEVELS, ConfigError, devorch_dir, load_config, load_policy, load_test_env
+from devorch.core.analyzer.diff_reassess import path_matches
 from devorch.core.execution.sandbox import load_sandbox
 from devorch.core.execution.test_runner import detect_test_command, resolve_executable
 from devorch.git.manager import GitError, GitManager
@@ -139,6 +140,19 @@ def run_checks(root: Path, env: Mapping[str, str] | None = None) -> list[Check]:
             out.append(Check("테스트 환경변수", "ok", f"project.test_env: {', '.join(sorted(test_env))} (가짜 값으로 테스트 실행에만 추가됨)"))
     except ConfigError as e:
         out.append(Check("테스트 환경변수", "fail", str(e), "project.test_env 에는 가짜 값만 쓰세요(진짜 키는 config.yaml 에 쓰지 않습니다)."))
+
+    if policy.protected_paths:
+        try:
+            tracked: list[str] | None = GitManager(root).tracked_files()
+        except GitError:
+            tracked = None
+        names = ", ".join(f"{p.pattern}→{p.min_level}" for p in policy.protected_paths)
+        unmatched = [p.pattern for p in policy.protected_paths if tracked is not None and not any(path_matches(f, p.pattern) for f in tracked)]
+        if unmatched:
+            out.append(Check("보호 경로", "warn", f"{len(policy.protected_paths)}개 지정({names}) — 추적 중인 어떤 파일과도 일치하지 않는 패턴: {', '.join(unmatched)}",
+                             "오타이거나 아직 없는 파일입니다. 패턴 규칙: '/'로 끝나면 폴더, '/'가 없으면 파일 이름, 그 외는 저장소 기준 경로(fnmatch)."))
+        else:
+            out.append(Check("보호 경로", "ok", f"{len(policy.protected_paths)}개 지정: {names} (이 경로를 바꾸는 diff 는 위험도가 그 수준까지 올라감)"))
 
     cmd = (config.get("project") or {}).get("test_command") or detect_test_command(root)
     if not cmd:

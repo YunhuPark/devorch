@@ -241,7 +241,10 @@ class ControlPlane:
         run = record.run
         if not (run.analysis and run.risk and run.impact and run.plan):
             return
-        analysis, risk, impact, reasons = reassess_from_diff(run.analysis, run.risk, run.impact, validate_diff(record.diff))
+        analysis, risk, impact, reasons = reassess_from_diff(
+            run.analysis, run.risk, run.impact, validate_diff(record.diff),
+            protected=[(p.pattern, p.min_level) for p in self.policy.protected_paths],
+        )
         if not reasons:
             return
         before = run.plan

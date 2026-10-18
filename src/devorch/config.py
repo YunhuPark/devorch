@@ -31,6 +31,36 @@ class ApprovalPolicy(BaseModel):
         return v
 
 
+class ProtectedPath(BaseModel):
+    """A path the project OWNER declares sensitive. A diff that touches it is raised to at least ``min_level`` (never lowered).
+
+    DevOrch can only guess from keywords and path hints (``auth``, ``payment``, ``/db/`` ...); it cannot know that ``src/db.py`` holds the
+    publish queue of an auto-posting service. The owner can, so the owner says so. Matching (``core/analyzer/diff_reassess.py``): a pattern ending in
+    ``/`` is a folder (everything below it); a pattern without ``/`` is matched against the file NAME anywhere; otherwise ``fnmatch`` on the
+    repo-relative path with ``/`` separators (``*`` also crosses ``/``).
+    """
+
+    pattern: str
+    min_level: str = "high"
+
+    @field_validator("pattern")
+    @classmethod
+    def _pattern(cls, v: str) -> str:
+        v = v.strip().replace("\\", "/")
+        while v.startswith("./"):
+            v = v[2:]
+        if not v or v.startswith("/") or ".." in v.split("/"):
+            raise ValueError("pattern must be a non-empty repo-relative path (no leading '/', no '..')")
+        return v
+
+    @field_validator("min_level")
+    @classmethod
+    def _level(cls, v: str) -> str:
+        if v not in LEVELS[1:]:
+            raise ValueError(f"min_level must be one of {LEVELS[1:]} (low would change nothing)")
+        return v
+
+
 class SecurityPolicy(BaseModel):
     require_external_review: bool = True
     security_areas: list[str] = Field(default_factory=lambda: ["auth", "security", "permission", "payment"])
@@ -87,6 +117,7 @@ class Policy(BaseModel):
         default_factory=lambda: {"review": "openai", "security": "openai", "architecture": "gemini"}
     )
     approval: ApprovalPolicy = Field(default_factory=ApprovalPolicy)
+    protected_paths: list[ProtectedPath] = Field(default_factory=list)
     security: SecurityPolicy = Field(default_factory=SecurityPolicy)
     production: ProductionPolicy = Field(default_factory=ProductionPolicy)
     critical: CriticalPolicy = Field(default_factory=CriticalPolicy)

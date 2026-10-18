@@ -13,7 +13,8 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 설치: `python -m venv .venv` → `.venv\Scripts\Activate.ps1` → `pip install -e ".[dev,llm]"` → `pytest`. 막히면 `devorch doctor`.
 
 ## 현재 상태 (2026-10-09, 사실만)
-- **테스트: Windows 네이티브에서 597 passed, 2 skipped(전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 — 2026-10-18 test_finish 1건, 단독 재실행 2회는 통과, 실행 중 컴퓨터 절전이 있어 원인 미확정) (Docker 데몬이 꺼져 있으면 Docker 테스트 8개가 더 skip)** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
+- **테스트: Windows 네이티브에서 615 passed, 10 skipped(Docker 데몬 꺼짐: Docker 테스트 8개 + 기존 2개; 켜면 623 passed, 2 skipped)(전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 — 2026-10-18 test_finish 1건, 단독 재실행 2회는 통과, 실행 중 컴퓨터 절전이 있어 원인 미확정) (Docker 데몬이 꺼져 있으면 Docker 테스트 8개가 더 skip)** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
+- **`protected_paths`(2026-10-18):** 실제 저장소 시험에서 발행 큐 가드 변경(src/db.py 등)이 LOW 로 통과한 사례 → 소유자가 `policy.yaml` 에 민감 경로를 지정하면 diff 가 그 경로를 바꿀 때 위험도를 그 수준까지 올림(올리기만). 같은 diff 재현에서 HIGH·리뷰어·승인으로 막힘. 근거는 사례 1건, 경로만 보는 한계 그대로, 리뷰어는 mock(품질 미검증). 상세 `docs/DOGFOOD_LOG.md`.
   이 PC의 `git.exe` 실행이 간헐적으로 거부됨(WinError 5, 원인 미확정, `git/manager.py` 에 Windows 한정 재시도 완화책).
 - **설치·플랫폼 검증(2026-10-13, "사용자 실사용" 1단계):** 휠을 깨끗한 venv(짧은 경로)에 설치해 키 없이 `init → analyze → doctor → run --mock → bench cases` 가 모두 동작(패키지 데이터 포함, 출력을 파이프로 보낸 cp949 상태에서도).
   찾아 고친 것: 출력이 리다이렉트되면(cp949) `devorch doctor` 가 `—` 때문에 UnicodeEncodeError 로 죽음 → 출력 인코딩 오류를 `?` 로 대체(수정 전 실패 확인한 테스트).

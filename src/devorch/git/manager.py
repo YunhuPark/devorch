@@ -83,6 +83,10 @@ class GitManager:
     def head(self, cwd: Path | None = None) -> str:
         return self._git(["rev-parse", "--short", "HEAD"], cwd=cwd).stdout.strip()
 
+    def tracked_files(self) -> list[str]:
+        """Repo-relative paths git tracks (``git ls-files``)."""
+        return [l for l in self._git(["ls-files"]).stdout.splitlines() if l.strip()]
+
     def read_at_head(self, rel_path: str) -> str | None:
         proc = self._git(["show", f"HEAD:{rel_path}"], check=False)
         return proc.stdout if proc.returncode == 0 else None

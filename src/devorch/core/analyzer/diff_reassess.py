@@ -14,11 +14,13 @@ Limit: this looks at file PATHS only. A risky edit inside a neutrally named file
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from fnmatch import fnmatchcase
 from pathlib import PurePosixPath
 
 from devorch.core.analyzer.keywords import DATABASE_PATH_HINTS, SECURITY_PATH_HINTS
 from devorch.core.analyzer.risk_engine import assess_risk
-from devorch.models import ImpactReport, RiskAssessment, TaskAnalysis, TaskType
+from devorch.models import ImpactReport, RiskAssessment, RiskLevel, TaskAnalysis, TaskType
 
 DOC_SUFFIXES = {".md", ".rst", ".txt", ".adoc"}
 DOC_NAMES = {"license", "licence", "notice", "authors", "changelog", "readme", "copying", "contributing"}
@@ -30,8 +32,40 @@ def is_doc_file(path: str) -> bool:
     return p.suffix.lower() in DOC_SUFFIXES or (p.suffix == "" and p.name.lower() in DOC_NAMES)
 
 
+def _norm(path: str) -> str:
+    p = path.replace("\\", "/")
+    while p.startswith("./"):
+        p = p[2:]
+    return p
+
+
+def path_matches(path: str, pattern: str) -> bool:
+    """Owner-declared pattern (see config.ProtectedPath): folder prefix if it ends in '/', file name anywhere if it has no '/', else fnmatch."""
+    p, pat = _norm(path), _norm(pattern)
+    if pat.endswith("/"):
+        return p.startswith(pat)
+    if "/" not in pat:
+        return fnmatchcase(p.rsplit("/", 1)[-1], pat)
+    return fnmatchcase(p, pat)
+
+
+def protected_floor(files: list[str], protected: Sequence[tuple[str, str]]) -> tuple[RiskLevel | None, list[str]]:
+    """Highest ``min_level`` among the owner's protected paths that ``files`` touch, and the files/patterns that caused it."""
+    best: RiskLevel | None = None
+    hits: list[tuple[RiskLevel, str]] = []
+    for pattern, level_name in protected:
+        level = RiskLevel(level_name)
+        for f in files:
+            if path_matches(f, pattern):
+                hits.append((level, f"{f} (패턴 {pattern!r})"))
+                if best is None or level.rank > best.rank:
+                    best = level
+    return best, [text for level, text in hits if best is not None and level == best]
+
+
 def reassess_from_diff(
-    analysis: TaskAnalysis, risk: RiskAssessment, impact: ImpactReport, files: list[str]
+    analysis: TaskAnalysis, risk: RiskAssessment, impact: ImpactReport, files: list[str],
+    protected: Sequence[tuple[str, str]] = (),
 ) -> tuple[TaskAnalysis, RiskAssessment, ImpactReport, list[str]]:
     """(analysis, risk, impact, reasons). ``reasons`` is empty when nothing had to be raised — then the inputs are returned unchanged."""
     reasons: list[str] = []
@@ -61,6 +95,12 @@ def reassess_from_diff(
         reasons.append(f"diff 기준 재평가로 위험도 {risk.level.value} → {new_risk.level.value}")
         new_risk = new_risk.model_copy(update={"floor_reason": "; ".join(reasons)})
     # same level, higher score: use the new assessment so the score and its factors show what was counted
+
+    floor, hits = protected_floor(files, protected)  # the owner's own declaration beats any guess: raise to at least that level
+    if floor is not None and floor.rank > new_risk.level.rank:
+        shown = ", ".join(hits[:3]) + (f" 외 {len(hits) - 3}개" if len(hits) > 3 else "")
+        reasons.append(f"소유자가 보호 경로로 지정한 파일을 diff 가 바꿈({shown}) → 최소 {floor.value.upper()}")
+        new_risk = new_risk.model_copy(update={"level": floor, "floor_reason": "; ".join(reasons)})
 
     if not reasons:
         return analysis, risk, impact, []
