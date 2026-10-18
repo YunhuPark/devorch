@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from devorch.audit import AuditLogger
-from devorch.config import Policy, devorch_dir, load_config, load_policy
+from devorch.config import Policy, devorch_dir, load_config, load_policy, load_test_env
 from devorch.core.analyzer.impact_analyzer import analyze_impact
 from devorch.core.analyzer.risk_engine import assess_risk
 from devorch.core.analyzer.diff_reassess import reassess_from_diff
@@ -138,6 +138,7 @@ class ControlPlane:
             skip_tests=skip_tests,
             blocked_env={c.get("api_key_env") for c in (config.get("providers") or {}).values() if c.get("api_key_env")},
             sandbox=load_sandbox(config),
+            test_env=load_test_env(config),
         )
         return cls(root, policy, config, providers, executor, provider_notes=notes)
 

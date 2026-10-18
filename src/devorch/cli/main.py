@@ -13,7 +13,7 @@ import typer
 from devorch.cli.app import DevorchTyper
 
 from devorch.audit import AuditLogger, verify_audit
-from devorch.config import devorch_dir, init_project, load_config, load_policy
+from devorch.config import devorch_dir, init_project, load_config, load_policy, load_test_env
 from devorch.core.analyzer.impact_analyzer import analyze_impact
 from devorch.core.analyzer.risk_engine import assess_risk
 from devorch.core.analyzer.task_analyzer import analyze_task
@@ -317,6 +317,7 @@ def run(
             skip_tests=no_tests,
             blocked_env={c.get("api_key_env") for c in (config.get("providers") or {}).values() if c.get("api_key_env")},
             sandbox=load_sandbox(config),
+            test_env=load_test_env(config),
         )
         try:
             executor.ensure_ready()

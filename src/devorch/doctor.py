@@ -12,7 +12,7 @@ from pathlib import Path
 
 import yaml
 
-from devorch.config import LEVELS, devorch_dir, load_config, load_policy
+from devorch.config import LEVELS, ConfigError, devorch_dir, load_config, load_policy, load_test_env
 from devorch.core.execution.sandbox import load_sandbox
 from devorch.core.execution.test_runner import detect_test_command, resolve_executable
 from devorch.git.manager import GitError, GitManager
@@ -132,6 +132,13 @@ def run_checks(root: Path, env: Mapping[str, str] | None = None) -> list[Check]:
             if not unpriced
             else Check("비용 상한", "fail", f"상한 ${cap} 이 설정됐지만 단가가 없는 provider가 있어 지킬 수 없음: {', '.join(unpriced)} — 실행이 거부됩니다", "해당 provider 의 input_per_mtok / output_per_mtok 를 설정하거나 상한을 null 로 두세요.")
         )
+
+    try:
+        test_env = load_test_env(config)
+        if test_env:
+            out.append(Check("테스트 환경변수", "ok", f"project.test_env: {', '.join(sorted(test_env))} (가짜 값으로 테스트 실행에만 추가됨)"))
+    except ConfigError as e:
+        out.append(Check("테스트 환경변수", "fail", str(e), "project.test_env 에는 가짜 값만 쓰세요(진짜 키는 config.yaml 에 쓰지 않습니다)."))
 
     cmd = (config.get("project") or {}).get("test_command") or detect_test_command(root)
     if not cmd:

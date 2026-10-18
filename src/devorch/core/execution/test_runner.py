@@ -150,6 +150,7 @@ async def run_tests(
     allowed: list[str],
     timeout_s: float,
     extra_blocked_env: set[str] | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> TestResult:
     ok, why = check_command(command, allowed)
     if not ok:
@@ -157,6 +158,7 @@ async def run_tests(
 
     argv = split_command(command)
     env = safe_env(extra_blocked_env)
+    env.update(extra_env or {})  # project.test_env: explicit dummy values, added AFTER the key-looking host variables were stripped
     exe = resolve_executable(argv[0], Path(cwd), env)
     if exe is None:
         return TestResult(False, command, None, "", f"실행 파일을 찾을 수 없음: {argv[0]}")

@@ -41,6 +41,7 @@ class Executor:
         skip_tests: bool = False,
         blocked_env: set[str] | None = None,
         sandbox: SandboxConfig | None = None,
+        test_env: dict[str, str] | None = None,
     ) -> None:
         self.root = Path(root).resolve()
         self.policy = policy
@@ -49,6 +50,7 @@ class Executor:
         self.skip_tests = skip_tests
         self.blocked_env = blocked_env or set()
         self.sandbox = sandbox or SandboxConfig()
+        self.test_env = dict(test_env or {})  # dummy values from project.test_env (see config.load_test_env)
         self._worktrees: dict[str, Path] = {}
 
     def _worktree(self, run: "WorkflowRun") -> Path | None:
@@ -155,10 +157,10 @@ class Executor:
             return False
         timeout = float(self.policy.limits.command_timeout_s)
         if self.sandbox.enabled:
-            result = await run_tests_docker(command, path, self.policy.allowed_commands, timeout, self.sandbox)
+            result = await run_tests_docker(command, path, self.policy.allowed_commands, timeout, self.sandbox, self.test_env)
             run.notes.append(f"테스트는 docker 샌드박스에서 실행 (image={self.sandbox.image}, network={self.sandbox.network})")
         else:
-            result = await run_tests(command, path, self.policy.allowed_commands, timeout, self.blocked_env)
+            result = await run_tests(command, path, self.policy.allowed_commands, timeout, self.blocked_env, self.test_env)
         run.test_summary = result.summary()
         run.test_output = result.output_tail
         if result.ok:

@@ -74,7 +74,7 @@ def container_user() -> tuple[int, int]:
     return FALLBACK_UID_GID
 
 
-def build_docker_args(cfg: SandboxConfig, name: str, cwd: Path, command: str, uid: int, gid: int) -> list[str]:
+def build_docker_args(cfg: SandboxConfig, name: str, cwd: Path, command: str, uid: int, gid: int, env: dict[str, str] | None = None) -> list[str]:
     assert cfg.image
     return [
         "docker", "run", "--rm", "--name", name,
@@ -84,6 +84,7 @@ def build_docker_args(cfg: SandboxConfig, name: str, cwd: Path, command: str, ui
         "--user", f"{uid}:{gid}",
         "--tmpfs", "/tmp:rw,size=256m",
         "-e", "HOME=/tmp",
+        *[a for k, v in (env or {}).items() for a in ("-e", f"{k}={v}")],  # project.test_env only — never the host's variables
         "-v", f"{Path(cwd).resolve()}:/work", "-w", "/work",
         cfg.image, *split_command(command, posix=True),
     ]
@@ -121,7 +122,7 @@ async def sandbox_status(cfg: SandboxConfig) -> list[tuple[str, bool, str]]:
 
 
 async def run_tests_docker(
-    command: str, cwd: Path, allowed: list[str], timeout_s: float, cfg: SandboxConfig
+    command: str, cwd: Path, allowed: list[str], timeout_s: float, cfg: SandboxConfig, env: dict[str, str] | None = None
 ) -> TestResult:
     ok, why = check_command(command, allowed, posix=True)  # the command runs in a Linux container
     if not ok:
@@ -133,7 +134,7 @@ async def run_tests_docker(
 
     name = f"devorch-{uuid.uuid4().hex[:12]}"
     uid, gid = container_user()
-    args = build_docker_args(cfg, name, cwd, command, uid, gid)
+    args = build_docker_args(cfg, name, cwd, command, uid, gid, env)
     proc = None
     for attempt in range(LAUNCH_RETRIES):
         try:

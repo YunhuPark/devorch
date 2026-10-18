@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import copy
 import math
+import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -131,6 +133,41 @@ def _merge(base: dict[str, Any], over: dict[str, Any]) -> dict[str, Any]:
 
 def devorch_dir(root: Path) -> Path:
     return Path(root) / DEVORCH_DIR
+
+
+def load_test_env(config: dict, host_env: dict[str, str] | None = None) -> dict[str, str]:
+    """``project.test_env``: DUMMY values the test run needs (e.g. a repo whose tests only start when ``SOME_API_KEY`` is set to anything).
+
+    DevOrch strips key/token/secret-looking variables from test runs; this is the explicit way to give a test run a placeholder. It is
+    meant for dummy values and is checked only as far as possible: DevOrch cannot tell a real key from a dummy in general, so it rejects
+    (a) values in a known credential format, (b) a value equal to the same-named variable in the real environment (a copied real key),
+    and (c) anything but plain strings/numbers. A real secret still must never be written to config.yaml.
+    """
+    from devorch.security.secret_redactor import has_secret_literal  # local: keeps config import-light
+
+    raw = (config.get("project") or {}).get("test_env")
+    if raw in (None, {}):
+        return {}
+    if not isinstance(raw, dict):
+        raise ConfigError("project.test_env 는 '이름: 값' 목록이어야 합니다")
+    host = os.environ if host_env is None else host_env
+    out: dict[str, str] = {}
+    for name, value in raw.items():
+        if not isinstance(name, str) or not _ENV_NAME.match(name):
+            raise ConfigError(f"project.test_env 의 이름이 환경변수 이름이 아닙니다: {name!r}")
+        if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+            raise ConfigError(f"project.test_env.{name} 는 문자열 또는 숫자여야 합니다")
+        text = str(value)
+        if has_secret_literal(text) or (host.get(name) and host[name] == text):
+            raise ConfigError(
+                f"project.test_env.{name} 의 값이 실제 키처럼 보입니다. 여기에는 가짜 값(예: test-key)만 쓰세요 — "
+                "진짜 키는 config.yaml 에 쓰지 않습니다."
+            )
+        out[name] = text
+    return out
+
+
+_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class ConfigError(ValueError):
