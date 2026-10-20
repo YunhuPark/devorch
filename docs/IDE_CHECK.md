@@ -15,7 +15,7 @@ powershell -File C:\Users\qkrdb\Documents\devorch\tools\demo\reset_playground.ps
 되돌린 뒤 처음 쓰면 `.devorch/.gitignore` 가 한 줄 수정됐다고 `git status` 에 뜰 수 있습니다(이전 버전 파일에 새 항목을 덧붙이는 정상 동작).
 
 ## 0. 정책 승인 (처음 한 번, 그리고 초기화하거나 정책·설정을 고친 뒤마다) — 터미널
-에이전트가 `.devorch/policy.yaml`·`config.yaml` 을 몰래 고쳐 보호를 풀지 못하도록, **사람이 승인한 정책·설정과 달라지면 에이전트 도구(분석·리뷰·테스트·적용)가 멈춥니다.** 초기화 스크립트로 되돌린 뒤나 처음 쓸 때는 한 번 승인해야 합니다.
+에이전트가 `.devorch/policy.yaml`·`config.yaml` 을 몰래 고쳐 보호를 풀지 못하도록, **사람이 승인한 정책·설정과 달라지면 에이전트 도구(분석·리뷰·테스트·적용)가 멈춥니다.** 초기화 스크립트(`reset_playground.ps1 -Yes`)는 끝에서 이 승인을 같은 터미널에서 바로 물어봅니다. 처음 쓸 때나 따로 고쳤을 때는 아래 명령으로 한 번 승인하세요.
 ```powershell
 & "C:\Users\qkrdb\Documents\devorch\.venv\Scripts\python.exe" -m devorch policy accept -p "C:\Users\qkrdb\Documents\devorch-playground"
 ```

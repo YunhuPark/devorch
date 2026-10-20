@@ -16,6 +16,7 @@ from devorch.core.orchestrator.state import State
 from devorch.git.manager import GitError, GitManager
 from devorch.providers.base import ProviderRegistry
 from devorch.providers.mock import MockProvider
+from devorch.security import policy_guard
 from devorch.security.secret_redactor import has_secret_literal
 
 PYTEST_CMD = f"{sys.executable} -m pytest -q"
@@ -47,6 +48,7 @@ def repo(tmp_path):
     (r / "test_calc.py").write_text("from calc import add\n\ndef test_add():\n    assert add(2, 3) == 5\n", encoding="utf-8")
     git(r, "add", "-A")
     git(r, "commit", "-q", "-m", "init")
+    policy_guard.accept(r)  # a human accepted the (default) policy; `run --apply` refuses a project nobody accepted
     return r
 
 

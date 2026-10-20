@@ -153,18 +153,74 @@ def test_the_record_lives_outside_the_project_next_to_the_key(repo):
 
 
 # ---- scope -------------------------------------------------------------------------------------------------------------------------
-def test_direct_construction_is_unchecked_and_a_running_server_keeps_what_it_loaded(repo):
+def test_direct_construction_is_not_checked(repo):
     reg = ProviderRegistry()
     reg.register(MockProvider("claude", ["[]"]))
     direct = ControlPlane(repo, Policy(), {}, reg, Executor(repo, Policy()))
     assert direct.policy_state is None and direct.analyze_task(TASK)["task_id"]  # tests/library users: not checked
 
+
+# ---- while the server is running ----------------------------------------------------------------------------------------------------
+def test_an_edit_while_the_server_runs_is_noticed_on_the_very_next_call_not_only_at_restart(repo):
+    policy_guard.accept(repo)
+    running = plane(repo)
+    assert running.analyze_task(TASK)["task_id"]
+    p = devorch_dir(repo) / "policy.yaml"
+    p.write_bytes(p.read_bytes() + b"\n# edited after the server started\n")
+    with pytest.raises(ControlPlaneError, match="바뀌었습니다"):
+        running.analyze_task(TASK)
+
+
+def test_even_an_accepted_edit_needs_a_restart_because_the_server_runs_on_what_it_loaded(repo):
     policy_guard.accept(repo)
     running = plane(repo)
     p = devorch_dir(repo) / "policy.yaml"
-    p.write_bytes(p.read_bytes() + b"\n# edited after the server started\n")
-    assert running.analyze_task(TASK)["task_id"]  # documented limit: noticed at the NEXT start, not mid-session
-    assert plane(repo).policy_state.status == "changed"
+    p.write_bytes(p.read_bytes() + b"\n# a legitimate change\n")
+    policy_guard.accept(repo)  # a human accepted it...
+    with pytest.raises(ControlPlaneError, match="다시 시작") as e:  # ...but THIS server still holds the old policy in memory
+        running.analyze_task(TASK)
+    assert "policy accept" not in str(e.value)  # accepting again would not help: the fix is a restart, so that is all it says
+    assert plane(repo).analyze_task(TASK)["task_id"]  # a freshly started server loads and uses the accepted files
+
+
+def test_accepting_without_changing_any_file_unblocks_a_running_server_without_a_restart(repo):
+    running = plane(repo)  # started before any human accepted
+    with pytest.raises(ControlPlaneError, match="policy accept"):
+        running.analyze_task(TASK)
+    policy_guard.accept(repo)  # files unchanged since this server loaded them
+    assert running.analyze_task(TASK)["task_id"]
+
+
+def test_reverting_an_edit_clears_the_block_for_the_running_server(repo):
+    policy_guard.accept(repo)
+    running = plane(repo)
+    p = devorch_dir(repo) / "policy.yaml"
+    original = p.read_bytes()
+    p.write_bytes(original + b"\n# oops\n")
+    with pytest.raises(ControlPlaneError):
+        running.analyze_task(TASK)
+    p.write_bytes(original)
+    assert running.analyze_task(TASK)["task_id"]
+
+
+def test_inspection_reports_the_mid_session_change_too(repo):
+    policy_guard.accept(repo)
+    running = plane(repo)
+    p = devorch_dir(repo) / "policy.yaml"
+    p.write_bytes(p.read_bytes() + b"\n# x\n")
+    assert running.inspect_project()["policy_accepted"] == "changed"
+
+
+# ---- the CLI workflow (`devorch run --apply`) ---------------------------------------------------------------------------------------
+def test_run_apply_refuses_an_unaccepted_policy_before_doing_anything(repo):
+    res = CliRunner().invoke(cli_main.app, ["run", "설명 문구 정리", "--mock", "--apply", "--yes", "-p", str(repo)])
+    assert res.exit_code == 2 and "policy accept" in res.output
+    assert not (devorch_dir(repo) / "tasks").exists() or not any((devorch_dir(repo) / "tasks").iterdir())  # no run was started
+
+
+def test_run_without_apply_is_not_blocked_by_this(repo):
+    res = CliRunner().invoke(cli_main.app, ["run", "설명 문구 정리", "--mock", "--yes", "-p", str(repo)])
+    assert "policy accept" not in res.output
 
 
 def test_read_only_inspection_still_works_and_says_how_to_fix_it(repo):

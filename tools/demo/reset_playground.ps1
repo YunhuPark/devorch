@@ -38,3 +38,13 @@ foreach ($f in @("audit.jsonl", "audit.head", "audit.jsonl.lock")) { Remove-Item
 Write-Host "`n완료. 상태:"
 G status --short
 Write-Host "calc.py: $((Get-Content (Join-Path $root 'calc.py') | Select-Object -Skip 1 -First 1).Trim())"
+
+# 되돌리면 정책·설정 파일이 달라지므로, 사람이 한 번 승인해야 에이전트 도구가 동작한다(devorch policy accept). 같은 터미널에서 이어서 묻는다.
+$py = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\..\.venv\Scripts\python.exe"))
+Write-Host "`n정책·설정 승인(처음 상태 그대로인지 확인하고 y):"
+if (Test-Path $py) {
+    & $py -m devorch policy accept -p $root
+    if ($LASTEXITCODE -ne 0) { Write-Host "승인하지 않았거나 이 터미널에서는 물을 수 없습니다. 나중에 직접 실행하세요: & `"$py`" -m devorch policy accept -p `"$root`"" }
+} else {
+    Write-Host "devorch 가상환경을 찾지 못했습니다. 직접 실행하세요: python -m devorch policy accept -p `"$root`""
+}

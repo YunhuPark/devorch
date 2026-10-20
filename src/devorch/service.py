@@ -127,6 +127,7 @@ class ControlPlane:
         self.audit = audit or AuditLogger(devorch_dir(self.root) / "audit.jsonl")
         self.provider_notes = provider_notes or {}
         self.policy_state: policy_guard.PolicyState | None = None  # set by from_project; None = not checked (direct construction, e.g. tests)
+        self._policy_loaded: dict[str, str | None] | None = None  # hashes of the files this server actually loaded (None = not checked)
 
     @classmethod
     def from_project(cls, root: Path, mock: bool = False, skip_tests: bool = False) -> "ControlPlane":
@@ -150,15 +151,32 @@ class ControlPlane:
         )
         plane = cls(root, policy, config, providers, executor, provider_notes=notes)
         plane.policy_state = policy_guard.check(root)
+        plane._policy_loaded = policy_guard.current_hashes(root)
         return plane
+
+    def _refresh_policy_state(self) -> policy_guard.PolicyState | None:
+        """Re-check on every call (cheap: two small files). Beyond "accepted?": this server runs on the policy/config it LOADED, so files that differ
+        from what it loaded are never in effect here — whether or not they were accepted since — and the server must be restarted to use them."""
+        if self.policy_state is None or self._policy_loaded is None:
+            return None  # direct construction (tests/library): not checked
+        st = policy_guard.check(self.root)
+        if st.ok and policy_guard.current_hashes(self.root) != self._policy_loaded:
+            st = policy_guard.PolicyState(
+                "changed",
+                "정책·설정 파일이 이 서버가 시작된 뒤에 바뀌었습니다. 이 서버는 시작할 때 읽은 내용으로 동작하므로, 바뀐 내용을 쓰려면 서버를 다시 시작해야 합니다"
+                "(IDE 에서는 /mcp 로 devorch 를 다시 연결). 의도하지 않은 변경이면 사람이 `devorch policy status` 로 확인하세요.",
+                [n for n, h in policy_guard.current_hashes(self.root).items() if h != self._policy_loaded.get(n)],
+            )
+        self.policy_state = st
+        return st
 
     def _require_accepted_policy(self) -> None:
         """The tools that change state refuse to run on a policy/config no human accepted (see security/policy_guard.py)."""
-        st = self.policy_state
-        if st is not None and not st.ok:
-            raise ControlPlaneError(
-                f"{st.problem} 사람이 터미널에서 직접 확인·승인해야 합니다(에이전트는 이 명령을 실행하지 않습니다): {policy_accept_command(self.root)}"
-            )
+        st = self._refresh_policy_state()
+        if st is None or st.ok:
+            return
+        how = "" if st.status == "changed" and "다시 시작" in (st.problem or "") else f" 사람이 터미널에서 직접 확인·승인해야 합니다(에이전트는 이 명령을 실행하지 않습니다): {policy_accept_command(self.root)}"
+        raise ControlPlaneError(f"{st.problem}{how}")
 
     # ---------------------------------------------------------------- helpers
     def _prices(self) -> dict[str, dict[str, float]]:
@@ -304,6 +322,7 @@ class ControlPlane:
             git = {"ready": True, "head": self.executor.git.head(), "dirty": self.executor.git.is_dirty()}
         except GitError as e:
             git = {"ready": False, "problem": str(e)}
+        self._refresh_policy_state()
         p = self.policy
         return {
             "root": str(self.root),

@@ -91,6 +91,13 @@ def init(path: Path = PathOpt, force: bool = typer.Option(False, "--force", help
     typer.echo("  4) devorch doctor  →  devorch analyze \"작업 설명\"  →  devorch review --git-range HEAD~1..HEAD --task \"작업 설명\"")
 
 
+def _require_policy_accepted(path: Path) -> None:
+    st = policy_guard.check(path)
+    if not st.ok:
+        typer.echo(f"{st.problem} 사람이 확인·승인해야 합니다: devorch policy accept -p \"{Path(path).resolve()}\"  (무엇이 바뀌었는지: devorch policy status)", err=True)
+        raise typer.Exit(2)
+
+
 policy_app = DevorchTyper(help="정책·설정(.devorch/policy.yaml, config.yaml)을 사람이 승인한 상태와 비교/승인한다", no_args_is_help=True)
 app.add_typer(policy_app, name="policy")
 
@@ -308,7 +315,6 @@ def run(
     except ValueError as e:
         typer.echo(f"오류: {e}", err=True)
         raise typer.Exit(2)
-
     # Even without --apply the implementer must SEE the files (as of HEAD, read-only) or it can only guess context lines
     # and the diff it writes won't apply. Without --apply nothing is applied, tested or created.
     reader = Executor(path, policy, skip_tests=True)
@@ -369,6 +375,7 @@ def run(
         except ExecutionError as e:
             typer.echo(f"--apply 불가: {e}", err=True)
             raise typer.Exit(2)
+        _require_policy_accepted(path)  # --apply runs tests and commits: only on a policy/config a human accepted (before the workflow starts any paid call)
         if executor.git.is_dirty():
             typer.echo("※ 작업 트리에 커밋되지 않은 변경이 있습니다. AI는 HEAD 기준으로 작업하며 그 변경은 보이지 않습니다.")
         typer.echo("※ 테스트는 샌드박스 없이 이 컴퓨터에서 실행됩니다(키/토큰 환경변수는 제거, allowlist 명령만 허용).")
