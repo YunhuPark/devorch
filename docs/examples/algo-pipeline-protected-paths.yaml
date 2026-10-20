@@ -1,0 +1,32 @@
+protected_paths:
+  # --- 발행(되돌릴 수 없는 외부 게시)
+  - {pattern: src/agents/publisher.py, min_level: high}
+  - {pattern: src/agents/threads_publisher.py, min_level: high}
+  - {pattern: src/agents/content_queue.py, min_level: high}
+  # --- 발행 큐 상태(중복 게시·승인 우회를 막는 가드가 있는 곳)
+  - {pattern: src/db.py, min_level: high}
+  - {pattern: src/queue_runtime.py, min_level: high}
+  - {pattern: src/db_migration_queue.py, min_level: high}
+  - {pattern: src/db_factory.py, min_level: high}
+  # --- 무인 실행 스위치와 사람 승인
+  - {pattern: src/automation_mode.py, min_level: critical}
+  - {pattern: src/agents/approval.py, min_level: high}
+  - {pattern: src/agent_control/, min_level: high}
+  # --- 인증·토큰
+  - {pattern: src/api/, min_level: high}
+  - {pattern: scripts/get_ig_token.py, min_level: high}
+  - {pattern: scripts/refresh_ig_token.py, min_level: high}
+  # --- 사용자에게 자동으로 답글/DM 을 보내는 코드 (신호만 확인, 내용은 다 읽지 않음)
+  - {pattern: src/agents/comment_manager.py, min_level: high}
+  - {pattern: src/agents/dm_manager.py, min_level: high}
+  # --- 자동 실행 일정
+  - {pattern: src/scheduler.py, min_level: high}
+  - {pattern: run_daily.bat, min_level: medium}
+  - {pattern: run_on_login.bat, min_level: medium}
+  # --- 한 단계 낮게(리뷰어는 붙고 사람 승인은 없음): 너무 자주 걸리면 쓰기 어려운 곳
+  - {pattern: src/dashboard/, min_level: medium}
+  - {pattern: src/telegram_bot.py, min_level: medium}
+  - {pattern: .github/workflows/, min_level: medium}
+  # --- 가드 테스트를 약하게 만드는 변경(실패하는 테스트를 지워서 통과시키는 고전적 우회)
+  - {pattern: "tests/test_*guard*.py", min_level: medium}
+  - {pattern: tests/test_instagram_auth_security.py, min_level: medium}
