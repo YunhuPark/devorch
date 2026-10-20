@@ -296,6 +296,41 @@ def test_cli_accept_shows_the_dangerous_change_before_asking(repo, monkeypatch):
     assert policy_guard.check(repo).status == "changed"  # declined: still blocked
 
 
+def _risky_change(repo):
+    policy_guard.accept(repo)
+    pol = read_yaml(devorch_dir(repo) / "policy.yaml")
+    pol["allowed_commands"].append(f"{PY} marker.py")
+    write_yaml(devorch_dir(repo) / "policy.yaml", pol)
+
+
+@pytest.mark.parametrize("answer", ["y\n", "yes\n", "\n", "ACCEPTED\n", "n\n"])
+def test_a_risky_change_is_not_accepted_by_a_reflex_y(repo, monkeypatch, answer):
+    _risky_change(repo)
+    monkeypatch.setattr(cli_main, "_is_interactive", lambda: True)
+    res = CliRunner().invoke(cli_main.app, ["policy", "accept", "-p", str(repo)], input=answer)
+    assert res.exit_code == 1 and "허용 명령(allowed_commands)이 추가됨" in res.output
+    assert policy_guard.check(repo).status == "changed"
+
+
+@pytest.mark.parametrize("answer", ["accept\n", "  Accept \n"])
+def test_a_risky_change_is_accepted_only_when_the_word_is_typed(repo, monkeypatch, answer):
+    _risky_change(repo)
+    monkeypatch.setattr(cli_main, "_is_interactive", lambda: True)
+    res = CliRunner().invoke(cli_main.app, ["policy", "accept", "-p", str(repo)], input=answer)
+    assert res.exit_code == 0 and policy_guard.check(repo).ok
+
+
+def test_an_ordinary_change_still_takes_a_plain_yes(repo, monkeypatch):
+    policy_guard.accept(repo)
+    pol = read_yaml(devorch_dir(repo) / "policy.yaml")
+    pol["limits"]["max_retries"] = 5  # nothing on the risky list
+    write_yaml(devorch_dir(repo) / "policy.yaml", pol)
+    assert policy_guard.risky_changes(repo) == []
+    monkeypatch.setattr(cli_main, "_is_interactive", lambda: True)
+    res = CliRunner().invoke(cli_main.app, ["policy", "accept", "-p", str(repo)], input="y\n")
+    assert res.exit_code == 0 and policy_guard.check(repo).ok
+
+
 def test_doctor_reports_each_state(repo):
     c = by(run_checks(repo, env={}), "정책 승인")
     assert c.status == "warn" and "policy accept" in c.hint

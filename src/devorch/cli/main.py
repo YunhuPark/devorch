@@ -131,10 +131,16 @@ def policy_accept(path: Path = PathOpt) -> None:
     if st.status in ("tampered", "key_error"):
         typer.echo(f"{st.problem} 서명 키(`~/.devorch/state.key` 또는 DEVORCH_KEY_FILE)와 승인 기록을 확인하세요. 그대로 새로 승인할 수는 있습니다.", err=True)
     typer.echo(f"프로젝트: {Path(path).resolve()}")
-    for line in policy_guard.risky_changes(path):
+    risky = policy_guard.risky_changes(path)
+    for line in risky:
         typer.echo(f"  ※ {line}")
     typer.echo("\n" + policy_guard.describe_changes(path) + "\n")
-    if not typer.confirm("이 정책·설정을 승인할까요? (에이전트가 고친 내용이 아닌지 확인하세요)"):
+    if risky:  # a reflex 'y' is not enough for the changes that matter: the word has to be typed
+        typed = typer.prompt("위 ※ 항목을 직접 확인했다면 'accept' 를 그대로 입력하세요(그 외 입력은 승인하지 않습니다)", default="", show_default=False)
+        approved = typed.strip().lower() == "accept"
+    else:
+        approved = typer.confirm("이 정책·설정을 승인할까요? (에이전트가 고친 내용이 아닌지 확인하세요)")
+    if not approved:
         typer.echo("승인하지 않았습니다. 에이전트 도구는 계속 막혀 있습니다.")
         raise typer.Exit(1)
     policy_guard.accept(path)
