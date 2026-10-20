@@ -29,6 +29,7 @@ from devorch.providers.factory import build_registry
 from devorch.providers.mock import MockProvider
 from devorch.service import ControlPlane, ControlPlaneError
 from devorch.git.manager import GitError
+from devorch.security import policy_guard
 from devorch.store import Approval, StoreError
 
 app = DevorchTyper(help="DevOrch — AI Development Control Plane", no_args_is_help=True, add_completion=False)
@@ -86,7 +87,51 @@ def init(path: Path = PathOpt, force: bool = typer.Option(False, "--force", help
     for name, env in envs:
         typer.echo(f"       {name:<8} {env}: {'있음' if env and os.environ.get(env) else '없음'}")
     typer.echo("     PowerShell 예: $env:OPENAI_API_KEY = (Get-Clipboard -Raw).Trim()   (키를 복사한 뒤. Ctrl+V 로 입력창에 붙여넣지 마세요)")
-    typer.echo("  3) devorch doctor  →  devorch analyze \"작업 설명\"  →  devorch review --git-range HEAD~1..HEAD --task \"작업 설명\"")
+    typer.echo("  3) 설정을 다 고쳤으면 `devorch policy accept` 로 사람이 정책·설정을 한 번 승인하세요 (승인하지 않으면 에이전트 도구가 동작하지 않습니다).")
+    typer.echo("  4) devorch doctor  →  devorch analyze \"작업 설명\"  →  devorch review --git-range HEAD~1..HEAD --task \"작업 설명\"")
+
+
+policy_app = DevorchTyper(help="정책·설정(.devorch/policy.yaml, config.yaml)을 사람이 승인한 상태와 비교/승인한다", no_args_is_help=True)
+app.add_typer(policy_app, name="policy")
+
+
+@policy_app.command("status")
+def policy_status(path: Path = PathOpt) -> None:
+    """승인한 정책·설정과 현재 파일이 같은지, 다르면 무엇이 바뀌었는지 보여 준다."""
+    st = policy_guard.check(path)
+    if st.ok:
+        typer.echo("정책·설정이 사람이 마지막으로 승인한 상태와 같습니다.")
+        return
+    typer.echo(st.problem or "", err=True)
+    if st.status in ("unaccepted", "changed"):
+        for line in policy_guard.risky_changes(path):
+            typer.echo(f"  ※ {line}")
+        typer.echo("\n" + policy_guard.describe_changes(path))
+        typer.echo("\n의도한 내용이면: devorch policy accept")
+    raise typer.Exit(1)
+
+
+@policy_app.command("accept")
+def policy_accept(path: Path = PathOpt) -> None:
+    """정책·설정을 사람이 확인하고 승인한다. 승인하면 이 상태가 기준이 되고, 이후 바뀌면 에이전트 도구가 멈춘다."""
+    if not _is_interactive():
+        typer.echo("정책 승인은 사람이 터미널에서 직접 해야 합니다(비대화형 실행 거부).", err=True)
+        raise typer.Exit(2)
+    st = policy_guard.check(path)
+    if st.ok:
+        typer.echo("이미 승인된 상태입니다. 바뀐 것이 없습니다.")
+        return
+    if st.status in ("tampered", "key_error"):
+        typer.echo(f"{st.problem} 서명 키(`~/.devorch/state.key` 또는 DEVORCH_KEY_FILE)와 승인 기록을 확인하세요. 그대로 새로 승인할 수는 있습니다.", err=True)
+    typer.echo(f"프로젝트: {Path(path).resolve()}")
+    for line in policy_guard.risky_changes(path):
+        typer.echo(f"  ※ {line}")
+    typer.echo("\n" + policy_guard.describe_changes(path) + "\n")
+    if not typer.confirm("이 정책·설정을 승인할까요? (에이전트가 고친 내용이 아닌지 확인하세요)"):
+        typer.echo("승인하지 않았습니다. 에이전트 도구는 계속 막혀 있습니다.")
+        raise typer.Exit(1)
+    policy_guard.accept(path)
+    typer.echo("승인했습니다. 이 상태가 기준이 됩니다.")
 
 
 @app.command()

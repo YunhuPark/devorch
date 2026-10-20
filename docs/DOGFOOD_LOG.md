@@ -81,3 +81,6 @@
 
 ### 열린 문제 — 정책·설정 파일은 보호되지 않는다 (코드 읽기로 확인, **재현은 안 함**)
 `.devorch/**` 는 diff 수집에서 제외되고(`GitManager.DIFF_EXCLUDES`), `policy.yaml`/`config.yaml` 에 대한 무결성 검사도 없다. 정책은 MCP 서버가 시작될 때 읽는다. 따라서 파일을 쓸 수 있는 에이전트는 `.devorch/policy.yaml` 의 `protected_paths` 를 지우거나 `allowed_commands`/`config.yaml` 의 `test_command` 를 바꿀 수 있고, **그 변경은 어떤 리뷰된 diff 에도 나타나지 않으며** 서버가 다음에 시작할 때 적용될 것으로 추정된다. 보호 경로를 정해 놓아도 이 구멍이 있으면 의미가 줄어든다. 해결 방향(예: 정책 서명·해시 기록·시작 시 변경 경고)은 아직 설계하지 않았다.
+
+### 후속 — 정책·설정 파일 보호 (2026-10-20)
+위 '열린 문제'를 **재현**(리뷰되는 diff 에는 `src/store.py` 하나뿐인데 정책의 `protected_paths` 는 사라지고 `test_command` 는 바뀌어 다음 시작에 적용, 같은 종류의 변경이 LOW·승인 없음)한 뒤 수정했다: `devorch policy accept`(사람, 터미널) 로 승인한 정책·설정의 해시를 프로젝트 밖에 서명해 기록하고, 달라지면 에이전트 도구가 승인 명령을 안내하며 멈춘다. 같은 재현 스크립트가 이제 `changed` 로 막힌다. 한계(서명 키와 같음, 내용을 안 보고 승인하면 소용없음, 켜져 있는 동안의 수정은 다음 시작에 잡힘, `devorch run` 미적용)는 README 와 HANDOFF 에 있다. **이 저장소 시험 환경(algo-pipeline 복제본, 플레이그라운드)은 업그레이드 뒤 한 번 `policy accept` 가 필요하다.**

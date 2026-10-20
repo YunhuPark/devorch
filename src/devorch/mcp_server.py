@@ -53,6 +53,8 @@ DevOrch is a control plane for AI-made code changes. Use it in this order:
 If it returns approval_required, STOP and give the user the command in the response's `how_to_approve` field EXACTLY as written (it is a
 complete command for their terminal; do not shorten it to `devorch approve`, which may not run there). You cannot approve changes, and
 approval is void if the diff changes afterwards. Never work around a blocked step.
+If a tool says the project's policy/config was not accepted or changed since a human accepted it, STOP and give the user the command from the
+error message EXACTLY as written; never edit .devorch/policy.yaml or .devorch/config.yaml yourself and never run that command.
 After it returns status `committed`, tell the user the branch and give `how_to_finish` EXACTLY as written (it removes your leftover uncommitted edit so
 `merge_command` is not blocked) and then `merge_command`. Never run either yourself.
 """

@@ -17,6 +17,7 @@ from devorch.core.analyzer.diff_reassess import path_matches
 from devorch.core.execution.sandbox import load_sandbox
 from devorch.core.execution.test_runner import detect_test_command, resolve_executable
 from devorch.git.manager import GitError, GitManager
+from devorch.security import policy_guard
 from devorch.providers.factory import CLASSES, build_registry, key_problem
 from devorch.security.command_policy import check_command, split_command
 
@@ -140,6 +141,14 @@ def run_checks(root: Path, env: Mapping[str, str] | None = None) -> list[Check]:
             out.append(Check("테스트 환경변수", "ok", f"project.test_env: {', '.join(sorted(test_env))} (가짜 값으로 테스트 실행에만 추가됨)"))
     except ConfigError as e:
         out.append(Check("테스트 환경변수", "fail", str(e), "project.test_env 에는 가짜 값만 쓰세요(진짜 키는 config.yaml 에 쓰지 않습니다)."))
+
+    st = policy_guard.check(root)
+    if st.ok:
+        out.append(Check("정책 승인", "ok", "정책·설정이 사람이 마지막으로 승인한 상태와 같음"))
+    elif st.status == "unaccepted":
+        out.append(Check("정책 승인", "warn", st.problem or "", "사람이 `devorch policy accept` 로 한 번 승인해야 에이전트 도구(MCP)가 동작합니다."))
+    else:
+        out.append(Check("정책 승인", "fail", st.problem or "", "`devorch policy status` 로 무엇이 바뀌었는지 확인하고, 의도한 변경이면 `devorch policy accept` 로 승인하세요."))
 
     if policy.protected_paths:
         try:

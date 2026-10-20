@@ -37,6 +37,7 @@ from devorch.models import Finding, RiskLevel
 from devorch.providers.base import ProviderRegistry
 from devorch.providers.factory import build_registry
 from devorch.providers.mock import MockProvider
+from devorch.security import policy_guard
 from devorch.security.path_guard import resolve_inside
 from devorch.security.secret_redactor import has_secret_literal, redact
 from devorch.store import TaskRecord, TaskStore
@@ -88,6 +89,12 @@ def approve_command(root: Path, task_id: str) -> str:
     return f'{prefix}"{py}" -m devorch approve {task_id} -p "{root}"'
 
 
+def policy_accept_command(root: Path) -> str:
+    """Same shape as approve_command: a command the human pastes into their terminal."""
+    prefix = "& " if os.name == "nt" else ""
+    return f'{prefix}"{sys.executable}" -m devorch policy accept -p "{root}"'
+
+
 def finish_command(root: Path, task_id: str) -> str:
     """Same shape as approve_command: a command the user can paste (this interpreter, -p, PowerShell call operator on Windows)."""
     prefix = "& " if os.name == "nt" else ""
@@ -119,6 +126,7 @@ class ControlPlane:
         self.store = store or TaskStore(self.root)
         self.audit = audit or AuditLogger(devorch_dir(self.root) / "audit.jsonl")
         self.provider_notes = provider_notes or {}
+        self.policy_state: policy_guard.PolicyState | None = None  # set by from_project; None = not checked (direct construction, e.g. tests)
 
     @classmethod
     def from_project(cls, root: Path, mock: bool = False, skip_tests: bool = False) -> "ControlPlane":
@@ -140,7 +148,17 @@ class ControlPlane:
             sandbox=load_sandbox(config),
             test_env=load_test_env(config),
         )
-        return cls(root, policy, config, providers, executor, provider_notes=notes)
+        plane = cls(root, policy, config, providers, executor, provider_notes=notes)
+        plane.policy_state = policy_guard.check(root)
+        return plane
+
+    def _require_accepted_policy(self) -> None:
+        """The tools that change state refuse to run on a policy/config no human accepted (see security/policy_guard.py)."""
+        st = self.policy_state
+        if st is not None and not st.ok:
+            raise ControlPlaneError(
+                f"{st.problem} 사람이 터미널에서 직접 확인·승인해야 합니다(에이전트는 이 명령을 실행하지 않습니다): {policy_accept_command(self.root)}"
+            )
 
     # ---------------------------------------------------------------- helpers
     def _prices(self) -> dict[str, dict[str, float]]:
@@ -299,10 +317,14 @@ class ControlPlane:
                 "max_review_rounds": p.limits.max_retries + 1,
             },
             "test_command": self.executor.test_command or "(자동 감지)",
+            "policy_accepted": None if self.policy_state is None else self.policy_state.status,
+            **({"policy_problem": self.policy_state.problem, "policy_how_to_accept": policy_accept_command(self.root)}
+               if self.policy_state is not None and not self.policy_state.ok else {}),
         }
 
     def analyze_task(self, task: str, level: str | None = None) -> dict[str, Any]:
         """``level`` (CLI only, never an MCP argument) can RAISE the automatically assessed risk level, never lower it."""
+        self._require_accepted_policy()
         try:
             analysis = analyze_task(task)
         except ValueError as e:
@@ -388,6 +410,7 @@ class ControlPlane:
 
     def preview_review(self, task_id: str, diff: str | None = None) -> dict[str, Any]:
         """What a review would involve, with NO LLM call: the diff (validated), the reviewers, and the cost estimate."""
+        self._require_accepted_policy()
         record = self._load(task_id)
         sha = self._capture_diff(record, diff)  # may raise the plan (see _reassess_from_diff), so read the plan afterwards
         self.store.save(record)
@@ -407,6 +430,7 @@ class ControlPlane:
         }
 
     async def request_review(self, task_id: str, diff: str | None = None) -> dict[str, Any]:
+        self._require_accepted_policy()
         record = self._load(task_id)
         sha = self._capture_diff(record, diff)  # first: it may raise the plan (more reviewers, tests, approval) from the real diff
         run, plan = record.run, record.run.plan
@@ -497,6 +521,7 @@ class ControlPlane:
         return None
 
     async def run_tests(self, task_id: str) -> dict[str, Any]:
+        self._require_accepted_policy()
         record = self._load(task_id)
         run, plan = record.run, record.run.plan
         assert plan
@@ -534,6 +559,7 @@ class ControlPlane:
         }
 
     async def apply_changes(self, task_id: str) -> dict[str, Any]:
+        self._require_accepted_policy()
         record = self._load(task_id)
         run, plan = record.run, record.run.plan
         assert plan

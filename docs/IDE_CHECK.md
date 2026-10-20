@@ -14,6 +14,13 @@ powershell -File C:\Users\qkrdb\Documents\devorch\tools\demo\reset_playground.ps
 ```
 되돌린 뒤 처음 쓰면 `.devorch/.gitignore` 가 한 줄 수정됐다고 `git status` 에 뜰 수 있습니다(이전 버전 파일에 새 항목을 덧붙이는 정상 동작).
 
+## 0. 정책 승인 (처음 한 번, 그리고 초기화하거나 정책·설정을 고친 뒤마다) — 터미널
+에이전트가 `.devorch/policy.yaml`·`config.yaml` 을 몰래 고쳐 보호를 풀지 못하도록, **사람이 승인한 정책·설정과 달라지면 에이전트 도구(분석·리뷰·테스트·적용)가 멈춥니다.** 초기화 스크립트로 되돌린 뒤나 처음 쓸 때는 한 번 승인해야 합니다.
+```powershell
+& "C:\Users\qkrdb\Documents\devorch\.venv\Scripts\python.exe" -m devorch policy accept -p "C:\Users\qkrdb\Documents\devorch-playground"
+```
+바뀐 내용(허용 명령 추가, 보호 경로 제거 같은 위험한 변경은 ※ 로 따로 표시)을 보고 `y`. 상태만 보려면 같은 명령의 `policy accept` 를 `policy status` 로 바꿉니다.
+
 ## 1. 연결 (IDE)
 1. IDE 에서 위 폴더를 엽니다.
 2. Claude Code 가 `.mcp.json` 의 `devorch` 서버를 쓸지 묻습니다 → **이 서버만 사용**을 고릅니다. (화면에 뭐라고 나왔는지 기록)

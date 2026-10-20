@@ -27,6 +27,7 @@ pip install -e ".[dev,llm]"
 ```
 devorch doctor                                 # 이 컴퓨터에서 막히는 곳을 점검하고 해결 방법을 알려줌 (네트워크·LLM 호출 없음, 키 값은 출력 안 함)
 devorch init                                   # .devorch/config.yaml, policy.yaml 생성 + 채워야 할 항목(model, 단가)과 다음 단계를 안내
+devorch policy accept                          # (사람이 직접) 정책·설정을 확인하고 승인. 승인한 상태와 달라지면 에이전트 도구가 멈춤. `policy status` 는 무엇이 바뀌었는지 보여 줌
 devorch audit                                  # 감사 로그의 서명 사슬 검증: 중간 수정·삭제·순서 변경·끝부분 잘림을 찾음 (이상 시 종료 코드 1)
 devorch usage                                  # 감사 로그에서 작업별·provider별·날짜별 실제 지출 집계 (--days 7, --json). 단가 없는 호출은 $0이 아니라 '알 수 없음'으로 표시
 devorch analyze "로그인 기능에 JWT 인증 추가해줘"   # LLM 호출 없이 위험도/영향/라우팅/예상 비용 출력
@@ -51,6 +52,7 @@ DevOrch가 통제하려는 에이전트는 보통 프로젝트 폴더에 파일�
 - **승인과 작업 기록은 서명됩니다.** 서명 키는 프로젝트 밖(`~/.devorch/state.key`, 환경변수 `DEVORCH_KEY_FILE` 로 변경)에 있습니다. 파일 하나를 직접 써서 "승인됨"으로 만들면 서명이 맞지 않아 무시되고, 작업 기록을 고쳐도 거부됩니다(2026-10-14 이전에는 둘 다 가능했고 재현했습니다).
 - **샌드박스 없이 승인이 필요한 변경을 다루면 경고가 뜹니다.** `analyze_task` 와 `approval_required` 응답, 사람이 보는 `devorch approve` 화면, `devorch doctor` 에 "테스트가 이 컴퓨터에서 실행되므로 신뢰할 수 없는 에이전트는 스스로 승인할 수 있음"이 나옵니다. 더 엄격하게 쓰려면 `policy.yaml` 에 `approval: {require_sandbox_for_approval: true}` 를 켜세요(기본 꺼짐) — 그러면 Docker 샌드박스가 없을 때 사람 승인이 필요한 변경의 테스트는 **실행하지 않고 거부**합니다(승인이 필요 없는 변경은 그대로). 이 옵션은 MCP·`devorch review` 흐름에 적용되고, `devorch run` 은 승인이 같은 프로세스 안에서 이뤄져 해당이 없습니다.
 - **위험도 분류는 작업 문장과 파일 *경로*의 키워드로 추측하므로, 민감한 파일은 소유자가 지정하세요(`protected_paths`).** 실제 저장소에서 발행 큐의 상태를 바꾸는 `src/db.py` 수정이 문장·경로 어디에도 위험 신호가 없어 LOW(리뷰어·승인 없음)로 커밋된 사례가 있었습니다(2026-10-18, `docs/DOGFOOD_LOG.md`). `policy.yaml` 에 `protected_paths: [{pattern: "src/db.py", min_level: high}]` 처럼 적으면 diff 가 그 경로를 바꿀 때 위험도가 **그 수준까지 올라가고(내려가지는 않음)** 리뷰어·승인이 따라옵니다. 패턴은 `/` 로 끝나면 폴더, `/` 가 없으면 파일 이름(어느 폴더든), 그 외는 저장소 기준 경로(`*` 사용 가능)입니다. `devorch doctor` 가 추적 파일과 일치하지 않는(오타일 수 있는) 패턴을 알려 줍니다. **경로만 보는 한계는 그대로**라, 지정하지 않은 파일 안의 위험한 편집은 여전히 알아채지 못합니다.
+- **정책·설정 파일은 사람이 승인한 상태와 달라지면 에이전트 도구가 멈춥니다.** `.devorch/` 는 모든 diff 수집에서 빠지므로, 파일을 쓸 수 있는 에이전트가 `policy.yaml`(`protected_paths`, `allowed_commands`)이나 `config.yaml`(`test_command`)을 리뷰 없이 고치면 다음 서버 시작 때 그대로 적용되던 문제가 있었습니다(2026-10-20 재현). 이제 사람이 `devorch policy accept` 로 승인할 때 두 파일의 해시를 **프로젝트 밖**(서명 키 옆 `~/.devorch/policies/`)에 서명해 기록하고, 시작할 때 다르거나 기록이 없으면 `analyze/review/test/apply` 가 사람용 승인 명령을 알려 주며 멈춥니다. 승인 화면은 허용 명령 추가·보호 경로 제거·`test_command` 변경 같은 위험한 변경을 따로 표시합니다. **한계:** 서명 키와 같은 한계(같은 OS 사용자로 코드를 실행할 수 있으면 위조 가능 — Docker 샌드박스 권장), 사람이 내용을 보지 않고 승인하면 소용없음, 서버가 *켜져 있는 동안*의 수정은 다음 시작 때에야 잡힘. 기존 프로젝트는 업그레이드 뒤 한 번 `devorch policy accept` 가 필요합니다.
 - **감사 로그는 변조를 *알아채게* 서명된 사슬입니다.** 각 기록에 순번·앞 기록의 서명·자기 서명이 들어가고, 마지막 서명과 개수는 서명된 `audit.head` 에도 남습니다. 기록을 고치거나 중간에서 지우거나 순서를 바꾸거나 끝부분을 잘라 내면 `devorch audit`(과 `devorch doctor`)가 찾아냅니다. **막는 것이 아닙니다:** 로그와 `audit.head` 를 통째로 지우면 검증할 것이 없고, 키를 읽을 수 있는 코드(샌드박스 없는 테스트)는 위조할 수 있습니다. 이 기능 이전의 로그는 "서명 이전" 구간으로 인정됩니다.
 - **커밋 직전에 테스트한 worktree 의 내용이 그대로인지 확인합니다.** 테스트·승인 뒤에 파일을 바꾸면 커밋하지 않습니다.
 - **작업 설명이 아니라 실제 diff 로 게이트를 올립니다**(문서 작업이라 해 놓고 코드를 바꾸면 테스트가 필수가 됨).
@@ -128,7 +130,7 @@ src/devorch/
 ├── cli/main.py
 ├── config.py  audit.py  models.py
 bench/          # (src/devorch/bench) 케이스·채점·러너·리포트, cases/*.yaml
-tests/              # 623 tests + 2 skip (Windows에서 symlink 권한이 없으면 skip)
+tests/              # 643 tests + 2 skip (Windows에서 symlink 권한이 없으면 skip)
 examples/demo-spring/   # 영향 분석 시연용 작은 Java 프로젝트
 ```
 
