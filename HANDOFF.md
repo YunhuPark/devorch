@@ -12,8 +12,10 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 인터페이스: CLI(`devorch`, 안 되면 `python -m devorch`), MCP 서버(stdio), 읽기 전용 Dashboard. 코드는 `src/devorch`, 사용법은 README.md.
 설치: `python -m venv .venv` → `.venv\Scripts\Activate.ps1` → `pip install -e ".[dev,llm]"` → `pytest`. 막히면 `devorch doctor`.
 
-## 현재 상태 (2026-10-09, 사실만)
-- **테스트: Windows 네이티브에서 약 643 passed, 2 skipped(Docker 데몬 꺼짐이면 Docker 테스트 8개가 더 skip). policy 변경 직후 전체 실행은 632 passed·2 failed(서버를 띄우는 stdio 테스트의 준비 단계가 정책 승인을 안 해서 — 새 동작대로 막힌 것, 테스트를 고쳐 해당 파일 재통과; 전체 재실행은 CI 로 확인)(전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 — 2026-10-18 test_finish 1건, 단독 재실행 2회는 통과, 실행 중 컴퓨터 절전이 있어 원인 미확정) (Docker 데몬이 꺼져 있으면 Docker 테스트 8개가 더 skip)** (symlink 권한이 없어 1개 skip). 전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음 —
+## 현재 상태 (사실만 — 2026-10-22 갱신. 아래 항목은 날짜순이 아니라 최근 작업이 위쪽)
+- **한눈에(2026-10-22):** 실제 저장소(사용자의 `algo-pipeline`)에서 실제 Claude Code 로 시험해 나온 발견 4가지를 모두 처리하고 푸시·CI 통과: `project.test_env`(가짜 키라도 요구하는 테스트), `devorch finish`(커밋 뒤 미커밋 수정 정리), `protected_paths`(소유자가 민감 경로 지정), 정책·설정 파일 보호(`devorch policy accept`). 사용자 저장소에는 PR #13 으로 보호 경로 23개를 적용해 **머지됨**(`ca625f6`, `.devorch/policy.yaml`). 이 PC 의 시험 환경: 플레이그라운드(`..\devorch-playground`), 임시 복제본(`%TEMP%\dogfood\algo-pipeline`, push 차단).
+  **아직 안 한 것/못 하는 것:** 실제 리뷰어 비용·절감 측정(OpenAI 잔액 0 — 소비처 확인이 먼저), 사용자 인터뷰(사람이 해야 함), IDE 5단계(승인 파일 직접 만들기 지시)와 기본 모드 허용 창 화면, Docker 켠 상태의 전체 실행. 위험도 분류는 여전히 **경로만** 보고 내용은 보지 않는다.
+- **테스트:** Windows 네이티브 약 643 passed, 2 skipped(symlink 권한 1개 등; Docker 데몬이 꺼져 있으면 Docker 테스트 8개가 더 skip). CI(GitHub Actions) Windows/Linux/macOS × Python 3.11/3.12 테스트 6개 + 깨끗한 설치 3개 + Docker 샌드박스 1개 = 10개 작업 통과(최근 `ecf8271`, `62278c0`). **전체 실행 중 무작위로 1개가 실패하는 경우가 가끔 있음**(2026-10-18 `test_finish` 1건: 단독 재실행 2회 통과, 그 실행 중 컴퓨터가 절전 상태였음 — 원인 미확정; 그 전에도 `test_human_rejection_blocks` 1건). 새 동작(정책 승인) 도입 직후 stdio 테스트 2건이 승인 없이 서버를 띄워 실패했으나 테스트 준비 단계를 고쳐 해결.
 - **`protected_paths`(2026-10-18):** 실제 저장소 시험에서 발행 큐 가드 변경(src/db.py 등)이 LOW 로 통과한 사례 → 소유자가 `policy.yaml` 에 민감 경로를 지정하면 diff 가 그 경로를 바꿀 때 위험도를 그 수준까지 올림(올리기만). 같은 diff 재현에서 HIGH·리뷰어·승인으로 막힘. 근거는 사례 1건, 경로만 보는 한계 그대로, 리뷰어는 mock(품질 미검증). 상세 `docs/DOGFOOD_LOG.md`.
 - **해결(2026-10-20): 정책·설정 파일 보호 — `devorch policy accept`.** 문제: `.devorch/**` 는 diff 수집에서 제외되고 무결성 검사가 없어, 파일을 쓸 수 있는 에이전트가 `protected_paths`·`allowed_commands`·`test_command` 를 리뷰 없이 바꾸면 다음 서버 시작 때 적용됨 — **재현함**(바뀐 뒤 같은 종류의 변경이 LOW·승인 없음, 테스트 단계가 바뀐 명령으로 실행). 수정: 사람이 승인할 때 두 파일의 해시를 프로젝트 밖(`~/.devorch/policies/<프로젝트 id>/`, 키 옆)에 서명해 기록, 시작 시 다르거나 기록이 없으면 analyze/review/test/apply 가 사람용 승인 명령과 함께 멈춤(기록 삭제는 '미승인'으로 막힘). 승인 화면은 허용 명령 추가·보호 경로 제거·test_command 변경 등을 따로 표시. 테스트 19개 + 실제 stdio 1개, 변형 시험 12종, 같은 재현 스크립트가 이제 막힘. **보강(같은 날):** 도구 호출마다 재확인(서버가 읽은 내용과 파일이 다르면 승인 여부와 무관하게 재시작 안내, 파일 그대로 승인만 했으면 재시작 없이 해제), `devorch run --apply` 도 확인(git 저장소 확인 뒤, 워크플로가 유료 호출을 시작하기 전), 초기화 스크립트가 끝에서 승인을 묻는다(5종 변형 시험 추가; 처음엔 1종을 못 잡아 단언을 보강). **한계:** 서명 키와 같은 한계(같은 OS 사용자로 코드 실행 시 위조 가능 — Docker 샌드박스가 있어야 막힘), 내용을 안 보고 승인하면 소용없음. **기존 프로젝트는 업그레이드 뒤 한 번 `devorch policy accept` 필요**(플레이그라운드·algo-pipeline 복제본 포함).
   이 PC의 `git.exe` 실행이 간헐적으로 거부됨(WinError 5, 원인 미확정, `git/manager.py` 에 Windows 한정 재시도 완화책).
@@ -116,6 +118,14 @@ Task → Analyze → Risk → Impact → Route → Implement → Independent Rev
 11. **안전 장치는 일부러 깨 봐서 테스트가 잡는지 확인한다**(변형 확인). 비용·보안 거부는 LLM 호출 *전에* 일어나야 한다. 위험 수준은 올릴 수만 있고 낮출 수 없다.
 
 ## 지금 할 일 (우선순위)
+**2026-10-22 갱신(최신 우선순위):**
+A. **사용자 인터뷰 3~5명** — `docs/INTERVIEW_GUIDE.md`(질문·하지 말 것·판단 기준을 결과 전에 정함). 리허설(`docs/INTERVIEW_REHEARSAL.md`)은 *가상 인물이라 증거가 아님*. 정책 승인 단계가 시연에 추가됐으니 `docs/IDE_CHECK.md` 0단계를 포함해 한 번 리허설. 사람이 해야 하는 일.
+B. **실제 리뷰어 비용 측정** — `docs/DOGFOOD_PLAN.md`(사전 등록). 먼저 OpenAI 사용량 화면에서 소비처 확인(잔액 0, 충전해도 일주일 소진 — algo-pipeline 의 자동 실행일 수 있음, 추정). 키는 환경변수로만, 작업당 상한 `limits.max_cost_usd`, 사용자 동의 필요. 모델이 바뀌면 결과가 달라지므로 한 건의 결과로 결론을 내리지 않는다.
+C. **열린 설계 질문(사용자 결정/근거 더 필요):** (1) `require_sandbox_for_approval` 기본값 — 인터뷰 질문 7번(Docker 사용 여부)으로 먼저 확인; (2) 위험도 분류가 경로만 봄 — 내용(발행·큐·DB 쓰기) 기반 신호를 넣을지는 사례를 더 모은 뒤(1건에 맞춘 힌트 추가 금지); (3) 에이전트 *자신의* 셸이 키를 읽는 경로는 DevOrch 가 못 막음 — 호스트 설정 가이드는 미검증; (4) 한글 작업 문장은 브랜치 슬러그가 `task` 가 됨(사소); (5) `.devorch/**` 외 `.claude/settings.local.json` 같은 에이전트 설정 파일이 공개 저장소에 추적됨(사용자 저장소 쪽 확인 요청함).
+D. **IDE 직접 확인으로 남은 것:** 5단계(승인 파일 직접 만들기 지시), 도구 허용 창이 뜨는 기본 모드 화면, 정책 승인(0단계)을 포함한 처음부터의 시연.
+E. 다른 저장소(Python 외, npm/mvn/gradle)에서 `project.test_env`·`protected_paths`·`finish` 가 되는지 — 지금은 저장소 1개 근거.
+
+**이전부터 있던 항목(여전히 유효, 위 항목보다 우선순위 낮음):**
 1. **비용 범위의 hold-out 검증**: 4건으로 정한 출력 범위를 *새로운* 커밋 6~8개(`devorch review --git-range <커밋>~1..<커밋> --task "코드 변경 리뷰" --level high`)에 적용해 실제 값이 범위 안에 드는 비율을 센다.
    자격증명 형태 문자열(테스트용 가짜 키)이 든 커밋은 우리 검사가 거부하니 제외. 밖이면 범위를 넓히고(테스트 `LARGE` 에 관측값 추가) 좁히지 않는다. 더 큰 diff(1만 2천 토큰 초과)도 최소 1건.
 2. **Claude Code 연결의 남은 부분**: (헤드리스 검증은 두 번 끝남 - 위 '미검증' 목록 참고) 사용자가 IDE 에서 `..\devorch-playground` 를 열어 서버 승인 UI 와 `.mcp.json` 프로젝트 범위 흐름을 확인하고, 사람 승인(`devorch approve`) 뒤 에이전트가
