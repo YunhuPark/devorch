@@ -18,6 +18,7 @@ from collections.abc import Sequence
 from fnmatch import fnmatchcase
 from pathlib import PurePosixPath
 
+from devorch.core.analyzer import test_weakening
 from devorch.core.analyzer.keywords import DATABASE_PATH_HINTS, SECURITY_PATH_HINTS
 from devorch.core.analyzer.risk_engine import assess_risk
 from devorch.models import ImpactReport, RiskAssessment, RiskLevel, TaskAnalysis, TaskType
@@ -66,6 +67,8 @@ def protected_floor(files: list[str], protected: Sequence[tuple[str, str]]) -> t
 def reassess_from_diff(
     analysis: TaskAnalysis, risk: RiskAssessment, impact: ImpactReport, files: list[str],
     protected: Sequence[tuple[str, str]] = (),
+    diff: str = "",
+    detect_weakened_tests: bool = True,
 ) -> tuple[TaskAnalysis, RiskAssessment, ImpactReport, list[str]]:
     """(analysis, risk, impact, reasons). ``reasons`` is empty when nothing had to be raised — then the inputs are returned unchanged."""
     reasons: list[str] = []
@@ -101,6 +104,13 @@ def reassess_from_diff(
         shown = ", ".join(hits[:3]) + (f" 외 {len(hits) - 3}개" if len(hits) > 3 else "")
         reasons.append(f"소유자가 보호 경로로 지정한 파일을 diff 가 바꿈({shown}) → 최소 {floor.value.upper()}")
         new_risk = new_risk.model_copy(update={"level": floor, "floor_reason": "; ".join(reasons)})
+
+    if detect_weakened_tests and diff:  # content, not paths: a change that deletes/skips/trivialises tests (see core/analyzer/test_weakening.py)
+        signals = test_weakening.detect(diff)
+        weak = test_weakening.floor_for(signals)
+        if weak is not None and weak.rank > new_risk.level.rank:
+            reasons.append("테스트를 약하게 만드는 변경으로 보임(" + "; ".join(s.detail for s in signals) + f") → 최소 {weak.value.upper()}")
+            new_risk = new_risk.model_copy(update={"level": weak, "floor_reason": "; ".join(reasons)})
 
     if not reasons:
         return analysis, risk, impact, []

@@ -118,6 +118,8 @@ class Policy(BaseModel):
     )
     approval: ApprovalPolicy = Field(default_factory=ApprovalPolicy)
     protected_paths: list[ProtectedPath] = Field(default_factory=list)
+    # Content check (core/analyzer/test_weakening.py): a diff that deletes/skips/trivialises tests is raised to MEDIUM (one kind of signal) or HIGH (two). Raise-only.
+    detect_weakened_tests: bool = True
     security: SecurityPolicy = Field(default_factory=SecurityPolicy)
     production: ProductionPolicy = Field(default_factory=ProductionPolicy)
     critical: CriticalPolicy = Field(default_factory=CriticalPolicy)

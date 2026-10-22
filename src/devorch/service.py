@@ -280,6 +280,7 @@ class ControlPlane:
         analysis, risk, impact, reasons = reassess_from_diff(
             run.analysis, run.risk, run.impact, validate_diff(record.diff),
             protected=[(p.pattern, p.min_level) for p in self.policy.protected_paths],
+            diff=record.diff, detect_weakened_tests=self.policy.detect_weakened_tests,
         )
         if not reasons:
             return
