@@ -9,7 +9,7 @@
 AI에게 코드를 맡겨도 되는지 판단·통제하는 엔진. 사용자가 밝힌 동기(2026-10-08)는 **회사의 AI 비용**이다 — 단, 기획서의 정의는
 "통제 중심 Control Plane"이고 비용은 그 하위 기능이라 둘의 관계("위험에 비례해서만 검증 비용을 쓴다")는 **사용자가 아직 확정하지 않았다.**
 Task → Analyze → Risk → Impact → Route → Implement → Independent Review → Evaluate → Human Approval → Apply/Test → Audit
-인터페이스: CLI(`devorch`, 안 되면 `python -m devorch`), MCP 서버(stdio), 읽기 전용 Dashboard. 코드는 `src/devorch`, 사용법은 README.md.
+인터페이스: CLI(`devorch`, 안 되면 `python -m devorch`), MCP 서버(stdio), 읽기 전용 Dashboard. 코드는 `src/devorch`, 사용법은 docs/REFERENCE.md (README.md 는 소개).
 설치: `python -m venv .venv` → `.venv\Scripts\Activate.ps1` → `pip install -e ".[dev,llm]"` → `pytest`. 막히면 `devorch doctor`.
 
 ## 현재 상태 (사실만 — 2026-10-22 갱신. 아래 항목은 날짜순이 아니라 최근 작업이 위쪽)
