@@ -148,6 +148,67 @@ def policy_accept(path: Path = PathOpt) -> None:
 
 
 @app.command()
+def quickstart(
+    path: Path = PathOpt,
+    mock: bool = typer.Option(False, "--mock", help="연결 시험용: 가짜 리뷰어(비용 0)로 도는 MCP 등록 명령을 만든다"),
+    write_mcp_json: bool = typer.Option(False, "--write-mcp-json", help="프로젝트에 .mcp.json 을 만든다(이미 있으면 건드리지 않고 내용만 보여 준다)"),
+) -> None:
+    """처음 쓰는 사람용 한 번에: git 확인 → 초기화 → 점검 → 정책 승인 → MCP 등록 명령과 첫 요청 예시까지."""
+    from devorch.doctor import run_checks
+    from devorch.git.manager import GitManager
+
+    root = Path(path).resolve()
+    typer.echo(f"프로젝트: {root}\n")
+    try:
+        GitManager(root).ensure_ready()
+    except GitError as e:
+        typer.echo(f"먼저 해결해야 합니다: {e}\n  (git init → 파일 추가 → 첫 커밋 후 다시 실행하세요. DevOrch 는 git 저장소의 별도 브랜치에만 커밋합니다.)", err=True)
+        raise typer.Exit(2)
+
+    created = init_project(root)
+    typer.echo("1) 초기화: " + (", ".join(p.name for p in created) + " 생성" if created else "이미 되어 있어 건드리지 않았습니다."))
+
+    checks = [c for c in run_checks(root) if c.status in ("fail", "warn")]
+    if mock:  # a connection trial needs no provider keys
+        checks = [c for c in checks if not c.name.startswith(("provider", "사용 가능한 provider", "위험도"))]
+    typer.echo("2) 점검: " + ("막히는 곳이 없습니다." if not checks else f"{len(checks)}곳이 남았습니다."))
+    for c in checks:
+        typer.echo(f"   - [{'실패' if c.status == 'fail' else '주의'}] {c.name}: {c.detail}" + (f"\n       → {c.hint}" if c.hint else ""))
+
+    st = policy_guard.check(root)
+    if st.ok:
+        typer.echo("3) 정책 승인: 이미 승인된 상태입니다.")
+    elif _is_interactive():
+        typer.echo("3) 정책 승인 — 사람이 정책·설정을 한 번 확인합니다(승인하지 않으면 에이전트 도구가 동작하지 않습니다):")
+        try:
+            policy_accept(root)
+        except typer.Exit:
+            typer.echo("   승인하지 않았습니다. 나중에 직접 실행하세요: devorch policy accept")
+    else:
+        typer.echo("3) 정책 승인: 이 터미널에서는 물을 수 없습니다. 사람이 터미널에서 직접 실행하세요 → devorch policy accept")
+
+    py = sys.executable
+    args = ["-m", "devorch", "mcp", "-p", str(root)] + (["--mock"] if mock else [])
+    typer.echo("\n4) MCP 등록 (Claude Code):")
+    typer.echo(f'   claude mcp add devorch -- "{py}" ' + " ".join(f'"{a}"' if " " in a else a for a in args))
+    mcp_json = {"mcpServers": {"devorch": {"command": py, "args": args}}}
+    target = root / ".mcp.json"
+    if write_mcp_json and not target.exists():
+        target.write_text(json.dumps(mcp_json, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        typer.echo(f"   .mcp.json 을 만들었습니다: {target}")
+    elif write_mcp_json:
+        typer.echo(f"   .mcp.json 이 이미 있어 건드리지 않았습니다: {target}")
+    else:
+        typer.echo("   (또는 --write-mcp-json 으로 프로젝트에 .mcp.json 을 만듭니다)")
+
+    typer.echo("\n5) 에이전트에게 이렇게 말해 보세요:")
+    typer.echo("   devorch 로 진행해줘: <바꾸고 싶은 작업 한 줄>")
+    typer.echo("   → 에이전트가 분석→수정→리뷰→테스트까지 하고, 승인이 필요하면 멈춰서 사람이 실행할 명령을 알려 줍니다(그대로 터미널에 붙여넣으세요).")
+    if not mock:
+        typer.echo("\n실제 리뷰어를 쓰려면 API 키를 환경변수로만 넣으세요(PowerShell: 키를 복사한 뒤 $env:OPENAI_API_KEY = (Get-Clipboard -Raw).Trim()). 키를 파일이나 채팅에 쓰지 마세요.")
+
+
+@app.command()
 def analyze(
     task: str = typer.Argument(..., help="자연어 작업 설명"),
     path: Path = PathOpt,

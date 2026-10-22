@@ -85,6 +85,7 @@ Python 3.11 이상과 git이 필요합니다.
 python -m venv .venv && . .venv/bin/activate      # Windows: .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev,llm]"
 
+devorch quickstart                                 # 처음이라면 이 하나로: git 확인 → 초기화 → 점검 → 정책 승인 → MCP 등록 명령까지 (--mock: 연결 시험용)
 devorch doctor                                     # 이 컴퓨터에서 막히는 곳 점검 (LLM 호출 없음)
 devorch init                                       # .devorch/config.yaml, policy.yaml 생성
 devorch policy accept                              # 사람이 정책을 확인하고 승인

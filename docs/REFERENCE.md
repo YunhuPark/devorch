@@ -25,6 +25,7 @@ pip install -e ".[dev,llm]"
 
 그다음 (공통):
 ```
+devorch quickstart                             # 처음이라면 이 하나로: git 확인 → 초기화 → 점검 → 정책 승인 → MCP 등록 명령과 첫 요청 예시 (--mock 연결 시험, --write-mcp-json)
 devorch doctor                                 # 이 컴퓨터에서 막히는 곳을 점검하고 해결 방법을 알려줌 (네트워크·LLM 호출 없음, 키 값은 출력 안 함)
 devorch init                                   # .devorch/config.yaml, policy.yaml 생성 + 채워야 할 항목(model, 단가)과 다음 단계를 안내
 devorch policy accept                          # (사람이 직접) 정책·설정을 확인하고 승인. 승인한 상태와 달라지면 에이전트 도구가 멈춤. `policy status` 는 무엇이 바뀌었는지 보여 줌
