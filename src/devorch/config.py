@@ -118,8 +118,17 @@ class Policy(BaseModel):
     )
     approval: ApprovalPolicy = Field(default_factory=ApprovalPolicy)
     protected_paths: list[ProtectedPath] = Field(default_factory=list)
-    # Content check (core/analyzer/test_weakening.py): a diff that deletes/skips/trivialises tests is raised to MEDIUM (one kind of signal) or HIGH (two). Raise-only.
-    detect_weakened_tests: bool = True
+    # Content check (core/analyzer/test_weakening.py) for a diff that deletes/skips/trivialises tests: "advise" (default) only says so in the review notes and
+    # the audit log; "enforce" raises the risk to MEDIUM (one kind of signal) or HIGH (two), raise-only; "off" does nothing. Default is advise because on real
+    # histories most flagged commits were legitimate (docs/TEST_WEAKENING_EVAL.md).
+    test_weakening: str = "advise"
+
+    @field_validator("test_weakening")
+    @classmethod
+    def _test_weakening_mode(cls, v: str) -> str:
+        if v not in ("off", "advise", "enforce"):
+            raise ValueError("test_weakening must be off | advise | enforce")
+        return v
     security: SecurityPolicy = Field(default_factory=SecurityPolicy)
     production: ProductionPolicy = Field(default_factory=ProductionPolicy)
     critical: CriticalPolicy = Field(default_factory=CriticalPolicy)

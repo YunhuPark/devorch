@@ -21,6 +21,7 @@ from devorch.audit import AuditLogger
 from devorch.config import Policy, devorch_dir, load_config, load_policy, load_test_env
 from devorch.core.analyzer.impact_analyzer import analyze_impact
 from devorch.core.analyzer.risk_engine import assess_risk
+from devorch.core.analyzer import test_weakening
 from devorch.core.analyzer.diff_reassess import reassess_from_diff
 from devorch.core.analyzer.task_analyzer import analyze_task
 from devorch.core.evaluator.evaluator import evaluate
@@ -280,8 +281,9 @@ class ControlPlane:
         analysis, risk, impact, reasons = reassess_from_diff(
             run.analysis, run.risk, run.impact, validate_diff(record.diff),
             protected=[(p.pattern, p.min_level) for p in self.policy.protected_paths],
-            diff=record.diff, detect_weakened_tests=self.policy.detect_weakened_tests,
+            diff=record.diff, detect_weakened_tests=self.policy.test_weakening == "enforce",
         )
+        self._advise_on_weakened_tests(record)
         if not reasons:
             return
         before = run.plan
@@ -294,6 +296,20 @@ class ControlPlane:
             reviewers=[[f"{s.role}:{s.provider}" for s in before.review_steps], [f"{s.role}:{s.provider}" for s in run.plan.review_steps]],
             approval=[before.requires_human_approval, run.plan.requires_human_approval],
         )
+
+    def _advise_on_weakened_tests(self, record: TaskRecord) -> None:
+        """Default mode ("advise"): say so when the diff looks like it weakens tests, but do NOT raise the risk level. Measured on 4,840 real commits the signals
+        were right for only ~2-8% of the flagged ones (docs/TEST_WEAKENING_EVAL.md), so raising reviewers/approvals on them by default would mostly be noise."""
+        if self.policy.test_weakening != "advise":
+            return
+        signals = test_weakening.detect(record.diff)
+        if not signals:
+            return
+        note = "테스트 약화 의심(조언일 뿐 위험도는 올리지 않음 — 확인해 보세요): " + "; ".join(s.detail for s in signals)
+        if note not in record.run.notes:
+            record.run.notes.append(note)
+            self.store.save(record)
+            self._log(record, "test_weakening_advice", signals=[s.kind for s in signals])
 
     def _gate_status(self, record: TaskRecord) -> dict[str, Any]:
         run, plan = record.run, record.run.plan

@@ -175,35 +175,64 @@ def add_a_test(repo):
     p.write_text(p.read_text(encoding="utf-8") + "\n\ndef test_neg():\n    assert add(-1, 1) == 0\n", encoding="utf-8")
 
 
-async def test_deleting_the_failing_test_is_raised_to_medium_with_a_reviewer_and_says_why(repo):
-    rec = await review(plane_for(repo), repo, delete_the_failing_test)
-    assert rec.run.risk.level is RiskLevel.MEDIUM and rec.run.plan.review_steps and not rec.run.plan.requires_human_approval
-    assert "테스트를 약하게" in (rec.run.risk.floor_reason or "") and "순수하게 1개" in rec.run.risk.floor_reason
-    assert any("테스트를 약하게" in r for e in events(repo) if e["event"] == "mcp:diff_reassessed" for r in e["data"]["reasons"])
+async def test_by_default_it_only_advises_it_says_so_but_raises_nothing(repo):
+    plane = plane_for(repo)
+    assert plane.policy.test_weakening == "advise"
+    rec = await review(plane, repo, delete_the_failing_test)
+    assert rec.run.risk.level is RiskLevel.LOW and not rec.run.plan.review_steps and not rec.run.plan.requires_human_approval
+    assert any("테스트 약화 의심" in n and "조언일 뿐" in n for n in rec.run.notes)
+    assert any(e["event"] == "mcp:test_weakening_advice" and e["data"]["signals"] == ["tests_removed"] for e in events(repo))
+    resp = await plane.request_review(rec.id)  # asking again must not repeat the note or the audit record
+    assert sum("테스트 약화 의심" in n for n in plane.store.load(rec.id).run.notes) == 1
+    assert sum(e["event"] == "mcp:test_weakening_advice" for e in events(repo)) == 1
+    assert any("테스트 약화 의심" in n for n in resp["notes"])  # and the agent/human sees it in the review response
 
 
-async def test_two_kinds_of_weakening_need_a_human_approval(repo):
-    rec = await review(plane_for(repo), repo, delete_and_skip)
-    assert rec.run.risk.level is RiskLevel.HIGH and rec.run.plan.requires_human_approval
-
-
-async def test_a_real_fix_that_adds_a_test_is_not_touched(repo):
+async def test_advice_is_silent_for_an_ordinary_fix_that_adds_a_test(repo):
     def fix_and_test(r):
         fix_the_bug(r)
         add_a_test(r)
 
     rec = await review(plane_for(repo), repo, fix_and_test)
+    assert not any("테스트 약화" in n for n in rec.run.notes)
+    assert not any(e["event"] == "mcp:test_weakening_advice" for e in events(repo))
+
+
+async def test_enforce_raises_a_deleted_failing_test_to_medium_with_a_reviewer_and_says_why(repo):
+    rec = await review(plane_for(repo, test_weakening="enforce"), repo, delete_the_failing_test)
+    assert rec.run.risk.level is RiskLevel.MEDIUM and rec.run.plan.review_steps and not rec.run.plan.requires_human_approval
+    assert "테스트를 약하게" in (rec.run.risk.floor_reason or "") and "순수하게 1개" in rec.run.risk.floor_reason
+    assert any("테스트를 약하게" in r for e in events(repo) if e["event"] == "mcp:diff_reassessed" for r in e["data"]["reasons"])
+
+
+async def test_enforce_with_two_kinds_of_weakening_needs_a_human_approval(repo):
+    rec = await review(plane_for(repo, test_weakening="enforce"), repo, delete_and_skip)
+    assert rec.run.risk.level is RiskLevel.HIGH and rec.run.plan.requires_human_approval
+
+
+async def test_enforce_leaves_a_real_fix_that_adds_a_test_alone(repo):
+    def fix_and_test(r):
+        fix_the_bug(r)
+        add_a_test(r)
+
+    rec = await review(plane_for(repo, test_weakening="enforce"), repo, fix_and_test)
     assert rec.run.risk.level is RiskLevel.LOW and not rec.run.plan.review_steps
     assert not any(e["event"] == "mcp:diff_reassessed" for e in events(repo))
 
 
-async def test_the_check_can_be_switched_off_in_the_policy(repo):
-    rec = await review(plane_for(repo, detect_weakened_tests=False), repo, delete_the_failing_test)
+async def test_off_does_nothing_at_all(repo):
+    rec = await review(plane_for(repo, test_weakening="off"), repo, delete_the_failing_test)
     assert rec.run.risk.level is RiskLevel.LOW
+    assert not any("테스트 약화" in n for n in rec.run.notes) and not any(e["event"] == "mcp:test_weakening_advice" for e in events(repo))
 
 
-async def test_it_never_lowers_a_level_that_is_already_higher(repo):
-    plane = plane_for(repo)
+def test_an_unknown_mode_is_refused():
+    with pytest.raises(ValueError):
+        Policy(test_weakening="loud")
+
+
+async def test_enforce_never_lowers_a_level_that_is_already_higher(repo):
+    plane = plane_for(repo, test_weakening="enforce")
     tid = plane.analyze_task("결제 로직 변경 calc.py")["task_id"]
     before = plane.store.load(tid).run.risk.level
     delete_the_failing_test(repo)

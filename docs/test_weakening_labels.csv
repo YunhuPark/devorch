@@ -1,0 +1,116 @@
+﻿set,idx,repo,commit,subject,flagged,signals,label,reason
+K,0,glances,3b67eb1c79,Remove test on Windows and Python 3.13,no,,W,CI 매트릭스에서 Windows+3.13 테스트 제외(테스트 파일 밖이라 감지 범위 밖)
+K,1,marshmallow,bfc6bedf29,Remove strict parameter to fix test,no,,N,테스트 인자 정리
+K,2,marshmallow,8113031d02,"Remove broken ""bad dict"" tests",yes,tests_removed,W,"'깨진' 테스트 2개 삭제, 대체 없음, 기능 그대로"
+K,3,glances,7bb75893ea,Remove old unitaries tests. TODO for v2,yes,"deleted_test_file,tests_removed",W,"옛 단위 테스트 파일 통째 삭제, 대체 없음('TODO for v2')"
+K,4,loguru,f30f76bfe7,"Remove parser ""test()"" as not that useful",yes,"deleted_test_file,tests_removed",N,테스트 대상 기능(matcher) 자체를 삭제
+K,5,black,67726a7cf3,skip mono test while im working on it,no,,W,무조건 self.skipTest — 감지기는 skipTest 를 인식하지 못함
+K,6,marshmallow,199832b00b,Remove unused tests.base.assert_datetime_equal,yes,asserts_removed,N,쓰이지 않는 테스트 도우미 함수 삭제
+K,7,marshmallow,b1095c17db,Skip localtime tests on Linux,yes,skip_added,N,플랫폼 조건부 skipIf
+K,8,poetry,68a20fce39,test: ensure read-only temp files are removed,no,,N,임시 파일 정리
+K,9,loguru,fb0bfc7cc6,Drop Mypy tests entirely for Pypy implementation,yes,skip_added,N,PyPy 조건부 skipif
+K,10,poetry,2e3f10bdb1,tests: remove unnecessary http.disable() calls,no,,N,불필요한 호출 정리
+K,11,poetry,14ab449798,fix: remove side effects from tests (#6929),no,,N,픽스처 정리
+K,12,loguru,75b920160d,Remove outdated leftovers from typesafety tests,no,,N,오래된 skip 줄 제거(강화)
+K,13,poetry,7c1d3ee883,chore(tests): remove poetry.core-based test (#10929),yes,tests_removed,U,poetry-core 기반 테스트 삭제 — 함수는 남아 있어 판단 불가
+K,14,glances,bd35c77437,Disable history test on Windows,no,,N,플랫폼 조건(and not WINDOWS)
+K,15,black,591bedc2be,Support skipping AST printing on test failure,no,,N,환경변수 옵션 추가
+K,16,glances,e6f3145ef5,Trim the comments and drop a test that guarded nothing,yes,tests_removed,N,'아무것도 지키지 않던' 테스트 삭제 + 구현 변경
+K,17,loguru,aef32cca95,Re-add some skipped unit tests thanks to PyPy 7.3.8 release,no,,N,skip 제거(강화)
+K,18,black,2893c42176,Remove hard coded test cases (#3062),yes,tests_removed,N,하드코딩 테스트를 데이터 기반 parametrize 로 교체
+K,19,glances,64d0114b00,test: Fix flaky tests on AppVeyor,no,,W,단언을 주석 처리해 불안정 테스트 무력화 — 감지기는 주석 속 assert 를 추가된 단언으로 셈
+K,20,marshmallow,1fcc35c6d6,Remove incorrect test and expand test cases...,no,,N,테스트 케이스를 늘림
+K,21,loguru,db6c40bac1,Remove some noqa and adjust test reference files (#982),no,,N,참조 파일 조정
+K,22,marshmallow,e2b0d2216a,Remove stubborn test,yes,tests_removed,W,"'고집스러운' 테스트 삭제, 대체 없음"
+K,23,black,c9d2635b55,Remove mocking from tests (#4287),no,,N,mock 제거 리팩터
+K,24,glances,4c92e1b6e6,test: Fix flaky tests (allow empty dicts for list plugins),no,,U,"기댓값 완화(빈 dict 허용) — 감지기의 알려진 사각지대, 경계 사례"
+K,25,poetry,2920c3d6bc,remove dead testcase,yes,tests_removed,N,이미 skip 되어 있던 죽은 테스트 삭제
+K,26,loguru,02fcb9f21f,Remove unused imports and variables in tests (#38),no,,N,미사용 import 정리
+K,27,black,94a0b07dbe,Remove useless flake8 config + test support code (#2221),no,,N,flake8 설정 정리
+K,28,glances,cb377055f2,Remove test because it breaks the CI test,yes,tests_removed,W,CI 를 깨는 테스트를 주석 처리
+K,29,glances,8836611999,Remove skipped tests for footer and API docs links,yes,tests_removed,W,"node 가 있는 환경에서는 실행되던 테스트 2개 삭제, 대체 없음"
+K,30,glances,b2e3ea283d,Remove test because it breaks the CI test,no,,N,단언 추가
+K,31,glances,4e34a298f7,Skip NPU test when plugin is disabled,no,,N,플러그인 비활성 조건
+K,32,loguru,01b4857adb,"Fix duplicate files ignored by ""check_dir()"" tests util",no,,N,단언 추가
+K,33,click,bbe1eb6d41,Remove duplicate test,no,,N,중복 단언 삭제
+K,34,black,6b5eb7d465,skip tests touching aiohttp when known exception occurs,no,,N,예외 발생 시 조건부 skip
+K,35,poetry,d4fd21e471,tests: make flaky test more robust (#11107),no,,N,불안정 테스트를 더 견고하게
+K,36,black,728c56c986,Remove the test-specific .flake8 file,yes,deleted_test_file,N,테스트 전용 flake8 설정 파일 삭제(테스트 아님)
+K,37,poetry,92d3995056,Skip config permissions test on Windows,yes,skip_added,N,Windows 조건부 skipif
+K,38,black,1382eabb3f,Remove deprecated use of 'setup.py test' (#1275),no,,N,setup.py test 안내 정리
+K,39,marshmallow,411c32164d,Remove unused import and calls to fixtures in tests,no,,N,픽스처 인자 제거
+K,40,poetry,ce8c843e34,Skip C extension test for Python <=3.4,yes,skip_added,N,Python 버전 조건부 skipif
+K,41,click,b761eda3ba,Skip some tests on Windows,yes,skip_added,N,Windows 조건부 skipif
+K,42,glances,d9abfca7fb,Remove test because it breaks the CI test,no,,N,주석 처리된 블록 정리
+K,43,black,ef903ecd46,Skip symlink test if can't create one (#287),no,,N,심볼릭 링크를 만들 수 없을 때만 skip
+K,44,poetry,7443d0f65d,reinstate skipped test,no,,N,skip 해제(강화)
+K,45,black,acd6198877,Skip symlink tests when the platform forbids creating one (#5390),yes,skip_added,N,플랫폼 조건부 pytest.skip
+K,46,glances,790bb70781,Ignore NPU test on Windows,yes,skip_added,N,플랫폼 조건부 skipIf
+K,47,click,3da552b79c,Skip test on Windows,yes,skip_added,N,Windows 조건부 skipif
+K,48,click,d97c93fa86,Remove leftover print function in test used for previous debugging (#876),no,,N,디버그 print 삭제
+K,49,black,3500e1cda5,MNT: remove unnecessary test deps + some refactoring (GH-2510),yes,tests_removed,N,unittest 에서 pytest 스타일로 리팩터
+K,50,click,d15f3c23a1,fix: Skip flaky pager test on macOS with free-threaded Python 3.14t,yes,skip_added,N,플랫폼+빌드 조건부 skipif(불안정)
+K,51,marshmallow,d3f408dcda,Remove unused code in test,no,,N,미사용 코드 삭제
+K,52,poetry,1b0caf50f6,tests/integration: disable httpretty,no,,N,픽스처 추가
+K,53,marshmallow,b6074bc7b1,Remove dead code and expand test coverage,no,,N,테스트 확장
+K,54,glances,4295b038df,"cutover C3: delete the Glances v4 code, WebUI and tests",yes,"deleted_test_file,tests_removed",N,v4 코드·UI·테스트를 통째로 걷어내는 전환(기능 삭제)
+F,0,loguru,9a13a38cf0,"Fix usage of ""pathlib"" in implementation breaking unit tests",yes,"tests_removed,skip_added",N,OS별 변형 테스트로 재구성
+F,1,glances,790bb70781,Ignore NPU test on Windows,yes,skip_added,N,플랫폼 조건부 skipIf
+F,2,marshmallow,75faf26653,Remove legacy fields,yes,tests_removed,N,레거시 필드 기능 삭제
+F,3,loguru,d47a43cc96,Simplify tests and implementation of weekday file rotation,yes,tests_removed,U,구현 단순화와 함께 파라미터 테스트 삭제 — 같은 동작이 남았는지 판단 불가
+F,4,marshmallow,ecc0611fbb,Don't validate required fields upon serialization,yes,tests_removed,N,동작 변경에 맞춰 테스트 갱신
+F,5,marshmallow,363559b98f,Remove optional context parameter for Method fields,yes,tests_removed,N,기능(context 파라미터) 삭제
+F,6,marshmallow,11a0545ba9,Deprecate Field.fail in favor of Field.make_error (#1332),yes,asserts_removed,N,parametrize 로 재구성
+F,7,glances,690280ae67,v5: v4 startup flags that seed existing toggles,yes,skip_added,N,새 테스트에 붙은 조건
+F,8,loguru,e3b3826457,Add support for Windows multiprocessing using queued sinks,yes,skip_added,N,"새 기능의 테스트, 조건부 skipif"
+F,9,marshmallow,99a2e48278,Only accept one field name in ValidationError,yes,asserts_removed,N,동작 변경에 맞춰 테스트 갱신
+F,10,poetry,52fd2873d2,solver: fix KeyError due to orphan decisions (#11008),yes,skip_added,N,새 테스트(알려진 문제는 xfail 로 문서화)
+F,11,glances,20f0ee94d4,WebUI v5: give the containers block an elastic tail column,yes,skip_added,N,새 UI 테스트
+F,12,poetry,945ca1d365,fix (setup_reader): parse arguments when setuptools.setup() is used (#1761) (#1764),yes,skip_added,N,새 테스트의 조건부 skipif
+F,13,loguru,f633a89862,Remove the mess with built-in logging,yes,tests_removed,N,대규모 리팩터
+F,14,click,38c0579d72,Bring back skip for Windows due to invalid syntax,yes,skip_added,N,플랫폼 조건부 skipif
+F,15,black,c4bd2e31ce,Draft for Black 2023 stable style (#3418),yes,tests_removed,N,스타일 안정화(재구성)
+F,16,loguru,d74f9f7215,"Split ""tests/test_add_options.py"" into multiple files",yes,deleted_test_file,N,테스트 파일 분할(이동)
+F,17,loguru,e17479bd07,Fix deprecation warning raised by tests with Python 3.14 (#1298),yes,skip_added,N,Python 버전 조건부 skipif
+F,18,marshmallow,9ed8c6cb2d,Split serialization and utils tests,yes,tests_removed,N,테스트 재구성
+F,19,poetry,51f1147dc9,installer: add config installer.only-binary,yes,asserts_removed,N,새 기능 테스트 갱신
+F,20,loguru,b2b1366406,Remove reset() function as useless and error prone,yes,tests_removed,N,기능(reset) 삭제
+F,21,click,43c2e7f331,format_filename replaces invalid bytes,yes,skip_added,N,"새 테스트, 조건부 skipif"
+F,22,click,2468b70997,Fix readline backspace/line-wrapping on linux (#2969),yes,skip_added,N,수정에 맞춰 테스트 갱신
+F,23,marshmallow,365f51ad83,Remove legacy decorators API,yes,tests_removed,N,레거시 API 삭제
+F,24,glances,3e8e4c4ee8,Glances v5 - Fix findings of the 2026-09-13 code review,yes,skip_added,N,새 테스트 추가
+F,25,click,2d5a1563dc,parametrize bool switch and flag tests,yes,asserts_removed,N,parametrize 로 재구성
+F,26,poetry,733310ca4a,lock: resolve dependencies on no-update,yes,"deleted_test_file,skip_added",N,새 테스트로 교체
+F,27,marshmallow,5ca13eb9c9,Rework datetime tests (use match in pytest.raises),yes,asserts_removed,N,pytest.raises(match=) 로 같은 검증을 형태만 변경
+F,28,poetry,dad6cda252,Fix root package installation for pure Python packages,yes,tests_removed,U,수정과 함께 순수 Python 빌드 테스트 삭제 — 판단 불가
+F,29,poetry,a2cf6acde6,Fix reading of some setup.py files,yes,skip_added,N,"새 테스트, 버전 조건부 skipif"
+F,30,marshmallow,83efec6e93,Fix tests,yes,tests_removed,U,'Fix tests' — 테스트 하나가 사라졌고 맥락 부족
+F,31,poetry,c7055be9b4,New and faster installer implementation (#2595),yes,skip_added,N,설치기 전면 재작성
+F,32,marshmallow,3d204040b4,Remove LocalDateTime,yes,tests_removed,N,기능(LocalDateTime) 삭제
+F,33,marshmallow,3dc54d02ed,Remove method_name and func params from Method and Function,yes,tests_removed,N,기능(파라미터) 삭제
+F,34,poetry,ff8ae32740,use packaging.utils.canonicalize_name(),yes,tests_removed,N,자체 함수를 라이브러리로 대체
+F,35,poetry,92d3995056,Skip config permissions test on Windows,yes,skip_added,N,Windows 조건부 skipif
+F,36,glances,168d3392ce,Webui,yes,skip_added,N,새 UI 테스트
+F,37,marshmallow,2ec3f11fe7,Don't recursively check required missing in Nested fields,yes,tests_removed,N,동작 삭제
+F,38,loguru,ef05ae3350,"Remove class-sink and **kwargs from ""add()"" valid arguments",yes,tests_removed,N,기능 삭제
+F,39,marshmallow,2c76be6506,Rename marshalling.py -> error_store.py,yes,deleted_test_file,N,파일 이름 변경에 따른 이동
+F,40,loguru,a168abede5,Add metaclass to create notifier,yes,tests_removed,N,알림 구현을 일반화하며 테스트도 일반화
+F,41,loguru,dd9ebb48e6,"Fix ""zip"" and ""gzip"" compression",yes,deleted_test_file,N,테스트 파일 분할(이동)
+F,42,click,7c575d6b46,parametrize test,yes,asserts_removed,N,parametrize 로 재구성
+F,43,loguru,f3dc4c6622,Make mypy truly optional for running the tests (#1465),yes,skip_added,N,선택 의존성 조건부 skipif
+F,44,marshmallow,fab23757ba,"Remove utils.from_rfc, rfcformat",yes,tests_removed,N,기능 삭제
+F,45,marshmallow,0f1c973408,Don't raise ValidationError in Unmarshaller.deserialize,yes,tests_removed,N,동작 삭제
+F,46,poetry,ea7d9d1f22,Add solutions for common errors (#2396),yes,skip_added,N,"새 기능 테스트, 조건부 skipif"
+F,47,poetry,c6d741d71f,feat(cli): support pep 735 on add (#10130),yes,skip_added,N,"새 기능, 미지원 부분은 xfail 로 문서화"
+F,48,loguru,5488d7d38d,Support Template Strings for log messages (#1397),yes,skip_added,N,"새 기능, 버전 조건부 skipif"
+F,49,marshmallow,2d1dbe0526,Do not test unintended features of IP fields.,yes,asserts_removed,U,'의도하지 않은 기능' 검증 삭제 — 계약을 좁힌 것인지 약화인지 경계
+F,50,marshmallow,e4c5879358,Accessor is defined on __accessor__ rather than class Meta option,yes,tests_removed,N,API 변경(Meta 옵션 삭제)
+F,51,marshmallow,443aa4ea00,"Require ""only"" and ""exclude"" fields to be on schema",yes,asserts_removed,N,동작 변경에 맞춰 갱신
+F,52,loguru,d38ced7539,Modify behavior of coroutine sink when no running event loop,yes,tests_removed,N,동작 변경에 맞춰 교체
+F,53,poetry,f3f71ea260,fix: revert #7916 to fix caching issue resulting in missing dependencies (#7995),yes,tests_removed,N,되돌림(revert)과 그 테스트
+F,54,poetry,6e5b59f580,feat: add builtin uninstaller as alternative to calling pip - variant without rollback (#10931),yes,skip_added,N,새 기능 테스트
+F,55,marshmallow,15c304948d,Fix tests (#1270),yes,asserts_removed,N,pytest.raises(match=) 로 형태만 변경
+F,56,poetry,bd64610eef,export: remove in-tree export logic,yes,"deleted_test_file,tests_removed",N,기능을 플러그인으로 이동
+F,57,loguru,4c8ebe267b,"Fix errors due to non-unpicklable Exception when ""enqueue=True""",yes,tests_removed,N,테스트 재구성(parametrize)
+F,58,marshmallow,9b7c19e98a,Remove test_structured_dict_nested_value_deserialization,yes,tests_removed,W,"테스트 하나를 삭제, 대체·기능 변경 없음"
+F,59,poetry,1c1cb921ef,git: allow http auth via dulwich,yes,skip_added,N,"새 테스트, 조건부 skipif"
