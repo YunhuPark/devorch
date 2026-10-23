@@ -30,6 +30,11 @@ def parse_json(text: str) -> dict | None:
         return None
 
 
+def _item(f: dict) -> dict:
+    """What a finding says (so a human can check it against the code): title, severity, file, which reviewer. Never any key or prompt text."""
+    return {k: f.get(k) for k in ("severity", "title", "file", "source", "category") if f.get(k) is not None}
+
+
 def review_one(project: str, commit: str, level: str, mock: bool, python: str, task: str) -> dict:
     cmd = [python, "-m", "devorch", "review", "-p", project, "--git-range", f"{commit}~1..{commit}", "--task", task, "--level", level, "--yes", "--json"]
     if mock:
@@ -52,6 +57,7 @@ def review_one(project: str, commit: str, level: str, mock: bool, python: str, t
         est_in_tokens=prev.get("input_tokens"), est_out_tokens=prev.get("output_tokens"),
         actual_usd=data.get("cost_usd"), in_tokens=inp, out_tokens=out,
         blocking=len(data.get("blocking") or []), warnings=[w.get("title") for w in (data.get("warnings") or [])],
+        blocking_items=[_item(f) for f in (data.get("blocking") or [])], warning_items=[_item(f) for f in (data.get("warnings") or [])],
     )
     return row
 

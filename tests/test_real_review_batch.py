@@ -63,3 +63,8 @@ def test_a_free_dry_run_summary_does_not_pretend_to_have_ratios():
 def test_json_is_found_after_leading_noise_and_garbage_is_not_json():
     assert batch.parse_json('경고 한 줄\n{"status": "READY"}') == {"status": "READY"}
     assert batch.parse_json("no json here") is None and batch.parse_json("{broken") is None
+
+
+def test_findings_are_kept_with_title_file_and_severity_but_nothing_else():
+    item = batch._item({"severity": "high", "title": "t", "file": "a.py", "source": "openai", "prompt": "SECRET-PROMPT", "key": "sk-nope"})
+    assert item == {"severity": "high", "title": "t", "file": "a.py", "source": "openai"}
