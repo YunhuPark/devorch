@@ -30,8 +30,11 @@ flowchart TD
 Python 3.11 이상과 git이 필요합니다.
 
 ```bash
-python -m venv .venv && . .venv/bin/activate      # Windows: .\.venv\Scripts\Activate.ps1
-pip install -e ".[dev,llm]"
+git clone https://github.com/YunhuPark/devorch.git
+cd devorch
+python -m venv .venv
+. .venv/bin/activate          # Windows PowerShell: .\.venv\Scripts\Activate.ps1
+pip install -e ".[dev,llm]"          # 약 4~5분(제작자 PC 기준 246초)
 
 devorch quickstart          # 이 하나로: git 확인 → 초기화 → 점검 → 정책 승인 → MCP 등록 명령과 첫 요청 예시
 ```
@@ -144,6 +147,7 @@ DevOrch는 "AI가 코드를 잘 쓰게 만드는 도구"가 아니라 "**잘못 
 | 영향 분석 (py/js/ts/java/kt import 그래프) | ✅ 정규식 휴리스틱 |
 | 대시보드 (읽기 전용) | ✅ API 테스트, 실제 Chromium에서 렌더링·XSS 확인 |
 | Cursor 등 Claude Code 외 클라이언트, macOS·rootless Docker, 실제 npm/mvn/gradle | ⚠️ 미검증 |
+| 처음 쓰는 사람이 혼자 시작할 수 있는가 | ⚠️ **아직 실시하지 않음** — 15분 "써 보기" 방법과 측정 기준을 먼저 고정해 둠([`docs/TRYOUT_SESSION.md`](docs/TRYOUT_SESSION.md)). 제작자 사전 점검: 설치 약 4분 반, 첫 실행 1초 |
 | 다른 사람·팀의 수요 | ⚠️ 미검증 (인터뷰하지 않음. 실사용은 내 저장소 1개 + IDE 3회) |
 | 비용 절감 | ⚠️ **입증하지 못함** (리뷰어 비용은 쟀지만 "전부 리뷰" 대비 절감은 추정이고, 에이전트 자신의 비용은 측정하지 않음) |
 | 위험도 분류 | ⚠️ 작업 문장과 파일 경로의 키워드 기반 추측. 파일 *내용*은 보지 않음. 소유자가 지정하는 `protected_paths`로 보완 |
@@ -189,4 +193,4 @@ tests/             # 테스트 724개(pytest 수집 기준, Docker·stdio 통합
 
 - [사례 연구](docs/CASE_STUDY.md) — 규모, 실사용 결과, 재현·수정 기록, 탐지율 측정, 한계
 - [상세 레퍼런스](docs/REFERENCE.md) — 전체 사용법, 신뢰 모델, 비용 추정, 샌드박스, 벤치마크 세부
-- [실사용 기록](docs/DOGFOOD_LOG.md) · [평가 설계](docs/EVAL_DESIGN.md) · [테스트 약화 감지 평가](docs/TEST_WEAKENING_EVAL.md) · [IDE 확인 절차](docs/IDE_CHECK.md) · [인수인계](HANDOFF.md)
+- [실사용 기록](docs/DOGFOOD_LOG.md) · [평가 설계](docs/EVAL_DESIGN.md) · [테스트 약화 감지 평가](docs/TEST_WEAKENING_EVAL.md) · [IDE 확인 절차](docs/IDE_CHECK.md) · [15분 써 보기 세션](docs/TRYOUT_SESSION.md) · [인수인계](HANDOFF.md)
