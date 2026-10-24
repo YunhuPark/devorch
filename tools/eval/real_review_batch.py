@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -33,6 +34,19 @@ def parse_json(text: str) -> dict | None:
 def _item(f: dict) -> dict:
     """What a finding says (so a human can check it against the code): title, severity, file, which reviewer. Never any key or prompt text."""
     return {k: f.get(k) for k in ("severity", "title", "file", "source", "category") if f.get(k) is not None}
+
+
+def review_errors(data: dict) -> list[str]:
+    """Why a required review did not happen, without the provider's response body (it can echo part of a key): reviewer, error class, HTTP code."""
+    out = []
+    for note in data.get("notes") or []:
+        head = str(note).split(" | ")[0]
+        m = re.match(r"review \d+: (\S+) (호출 실패|응답 파싱 실패)(?:: (\w+))?", head)
+        if not m:
+            continue
+        code = re.search(r"\b([1-5]\d\d)\b", head)
+        out.append(" ".join(p for p in (m.group(1), m.group(2), m.group(3), code.group(1) if code else None) if p))
+    return out
 
 
 def review_one(project: str, commit: str, level: str, mock: bool, python: str, task: str) -> dict:
@@ -59,6 +73,12 @@ def review_one(project: str, commit: str, level: str, mock: bool, python: str, t
         blocking=len(data.get("blocking") or []), warnings=[w.get("title") for w in (data.get("warnings") or [])],
         blocking_items=[_item(f) for f in (data.get("blocking") or [])], warning_items=[_item(f) for f in (data.get("warnings") or [])],
     )
+    missing = data.get("missing_reviews") or []
+    if missing:  # a required reviewer never answered (bad key, quota, unparsable reply): the verdict is fail-closed, not a finding
+        row["failed"] = True
+        row["missing_reviews"] = missing
+        row["review_errors"] = review_errors(data)
+        row["detail"] = ("필수 리뷰 미완료: " + ", ".join(missing) + " — " + "; ".join(row["review_errors"]))[:300]
     return row
 
 

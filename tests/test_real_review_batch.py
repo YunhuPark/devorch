@@ -68,3 +68,35 @@ def test_json_is_found_after_leading_noise_and_garbage_is_not_json():
 def test_findings_are_kept_with_title_file_and_severity_but_nothing_else():
     item = batch._item({"severity": "high", "title": "t", "file": "a.py", "source": "openai", "prompt": "SECRET-PROMPT", "key": "sk-nope"})
     assert item == {"severity": "high", "title": "t", "file": "a.py", "source": "openai"}
+
+
+NOTES = [
+    "review 1: security(openai) 호출 실패: AuthenticationError: Error code: 401 - {'error': {'message': 'Incorrect API key provided: sk-proj-ABCDEFGHIJKLMNOPQRSTUV'}} | 응답 본문: {}",
+    "review 1: architecture(gemini) 호출 실패: ClientError: 400 INVALID_ARGUMENT. API key not valid | 응답 본문: {}",
+    "something unrelated",
+]
+
+
+def test_a_failed_required_review_is_kept_as_error_class_and_http_code_but_never_the_response_body():
+    errors = batch.review_errors({"notes": NOTES})
+    assert errors == ["security(openai) 호출 실패 AuthenticationError 401", "architecture(gemini) 호출 실패 ClientError 400"]
+    assert "sk-proj" not in " ".join(errors)
+
+
+def test_a_review_where_a_required_reviewer_never_answered_is_a_failure_not_a_not_ready_finding(monkeypatch):
+    import json
+    import subprocess
+
+    payload = {"status": "NOT_READY", "preview": {"risk": "high", "diff_bytes": 10, "files": [], "estimated_usd": 0.01}, "cost_usd": 0.0,
+               "missing_reviews": ["security", "architecture"], "notes": NOTES, "blocking": [], "warnings": []}
+
+    class Proc:
+        returncode = 1
+        stdout = json.dumps(payload)
+        stderr = ""
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: Proc())
+    r = batch.review_one("p", "abc", "high", False, "python", "t")
+    assert r["failed"] and r["missing_reviews"] == ["security", "architecture"] and "AuthenticationError 401" in r["detail"]
+    assert "sk-proj" not in json.dumps(r)
+    assert batch.summarize([r])["failed"] == 1

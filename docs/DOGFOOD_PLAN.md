@@ -57,3 +57,5 @@ $env:GEMINI_API_KEY = (Get-Clipboard -Raw).Trim()     # Gemini 키를 복사한 
 Set-Location C:\Users\qkrdb\Documents\devorch
 & ".\.venv\Scripts\python.exe" tools\eval\real_review_batch.py --project "C:\Users\qkrdb\AppData\Local\Temp\dogfood\algo-pipeline" --commits 2f3e523,3bc10a9,f96b83d,dcd1e1c,40426bc,5bb9701,9bab0ad,9f506b3,a7e3bb8,18f79fc --level high --max-total-usd 0.50 --out "$env:TEMP\real_review_high.json"
 ```
+
+**1차 시도 기록(2026-10-24, 같은 날 정정):** 10건 모두 필수 리뷰(security·architecture)가 완료되지 않아 `NOT_READY`, 비용 $0, 토큰 0 이었다. 즉 **리뷰가 실행되지 않은 것**이고 HIGH 에 대한 어떤 결과도 아니다(차단·경고 0건을 "문제 없음"으로 읽으면 안 된다). 당시 배치 스크립트가 실패 이유를 기록하지 않고 요약에 `failed: 0` 으로 표시하는 **측정 도구 결함**이 있어 원인은 이 결과 파일만으로는 알 수 없다. 스크립트를 고쳤다(필수 리뷰 미완료는 실패로 분류, 오류 종류·HTTP 코드만 기록하고 응답 본문은 기록하지 않음). 대상·보고 항목·판정 기준은 바뀌지 않았고, 같은 계획으로 다시 실행한다.
