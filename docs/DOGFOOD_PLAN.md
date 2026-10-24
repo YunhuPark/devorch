@@ -36,3 +36,24 @@
 `tools/eval/real_review_batch.py` 가 고정한 커밋 목록을 실제 리뷰어(medium, OpenAI 1개)로 순서대로 리뷰하고, 호출마다 **예상 대 실제 비용·토큰 오차·경고**를 모아 요약한다(총상한을 넘을 수 있는 다음 호출은 건너뜀, 키는 읽거나 출력하지 않음, `--mock` 으로 무료 모의 실행).
 **커밋 선정 기준(결과를 보기 전에 고정):** ① DevOrch 작업 커밋 4개(`2f3e523`, `3bc10a9`, `f96b83d`, `dcd1e1c`) ② algo-pipeline `origin/main` 에서 `src/` 를 바꾼 최근 커밋 중 diff 1KB~12KB(1만 2천 토큰 초과는 비용 추정이 검증되지 않아 제외) 6개(`40426bc`, `5bb9701`, `9bab0ad`, `9f506b3`, `a7e3bb8`, `18f79fc`) ③ 작업 4(`dcd1e1c`) 한 번 더(같은 diff 를 다시 보내 리뷰어의 변동을 본다). 모든 커밋에 같은 중립 작업 문장("코드 변경 리뷰")과 `--level medium` 을 쓴다(커밋 제목의 키워드가 위험도를 바꾸지 않도록).
 **이 배치로 말할 수 있는 것:** 비용 추정기의 정확도(n≈11), 출력 토큰 오차, 리뷰어가 같은 diff 에서 얼마나 달라지는지(n=2). **말할 수 없는 것:** 절감, 리뷰어의 탐지 능력, high 리뷰(Gemini 키 필요)의 비용.
+
+## HIGH 리뷰 배치 (2026-10-24 추가, **결과를 보기 전에 고정**) — OpenAI + Gemini 키가 필요
+**왜:** 지금까지 실측은 medium(리뷰어 1개)뿐이다. 승인이 걸리는 HIGH/CRITICAL 은 `security=openai` + `architecture=gemini` **두 명**이라 비용·판정·지적이 다르다. 앞 배치에서 `40426bc` 가 Gemini 키가 없어 거부된 것도 이 때문이다.
+**대상(고정):** 앞 배치와 **같은 diff 10개를 한 번씩**(`2f3e523, 3bc10a9, f96b83d, dcd1e1c, 40426bc, 5bb9701, 9bab0ad, 9f506b3, a7e3bb8, 18f79fc`) `--level high`, 같은 중립 작업 문장. 같은 diff 라서 medium 대비 비교가 가능하다.
+**사전 추정(모의 실행):** 합계 $0.165(예상 범위 상단 합 $0.468). 총상한 $0.50.
+**보고할 것(분석 방법도 고정):**
+1. 호출당 실제 비용과 예상 대비(medium 과 비교), 입력·출력 토큰 오차
+2. medium 대비 HIGH 에서 **새로 나온 차단·경고**를 내가 코드를 읽어 하나씩 **실제 결함 / 틀림 / 표현 부정확**으로 판정(앞의 방식 그대로)
+3. 앞서 확인한 실제 결함 2개(`18f79fc`)를 HIGH 의 두 리뷰어가 찾는지
+4. 판정(READY/NOT_READY)이 medium 과 달라진 diff 수
+5. Gemini 호출의 비용·응답 형식 문제(파싱 실패 등)
+
+**하지 않는 것:** 결과를 보고 차단 판정 기준·리뷰 프롬프트를 바꾸지 않는다. 표본이 10개라 비율의 일반화는 하지 않는다. Gemini 에 무료 사용량이 있는지는 **확인하지 못했다**(미검증) — 비용은 실제 청구가 아니라 `config.yaml` 단가로 계산한 값이다.
+
+**실행(키 두 개를 같은 PowerShell 창의 환경변수로만, 파일·채팅에 쓰지 않는다):**
+```powershell
+$env:OPENAI_API_KEY = (Get-Clipboard -Raw).Trim()     # OpenAI 키를 복사한 뒤
+$env:GEMINI_API_KEY = (Get-Clipboard -Raw).Trim()     # Gemini 키를 복사한 뒤 (한 줄씩 따로 실행)
+Set-Location C:\Users\qkrdb\Documents\devorch
+& ".\.venv\Scripts\python.exe" tools\eval\real_review_batch.py --project "C:\Users\qkrdb\AppData\Local\Temp\dogfood\algo-pipeline" --commits 2f3e523,3bc10a9,f96b83d,dcd1e1c,40426bc,5bb9701,9bab0ad,9f506b3,a7e3bb8,18f79fc --level high --max-total-usd 0.50 --out "$env:TEMP\real_review_high.json"
+```
