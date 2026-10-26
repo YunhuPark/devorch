@@ -136,4 +136,4 @@ def test_quickstart_prints_the_deny_rule_for_the_real_key_folder_and_says_what_w
     else:
         assert not measured and rule.startswith("Read(//")
     # the claim of "verified" is made only where it was measured (Windows) and never hides what was not checked
-    assert ("직접 읽기가 막히는 것을 확인" in out and "우회는 확인하지 못했고" in out) if measured else ("확인하지 못했습니다" in out)
+    assert ("직접 읽기가 막히는 것을 확인" in out and "우회는 **막지 못했습니다**" in out) if measured else ("확인하지 못했습니다" in out)

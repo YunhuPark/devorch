@@ -212,7 +212,7 @@ def quickstart(
     typer.echo(f'   {{"permissions": {{"deny": ["{rule}"]}}}}')
     typer.echo(
         "   Claude Code 2.1.310 에서 Read 도구·Bash cat·PowerShell Get-Content 의 직접 읽기가 막히는 것을 확인했습니다(Windows). "
-        "파이썬 등 다른 프로그램으로 읽는 우회는 확인하지 못했고, 테스트 코드는 Docker 샌드박스가 필요합니다(docs/HOST_HARDENING.md)."
+        "다만 `python -c`·스크립트 파일·`node -e` 로 읽는 우회는 **막지 못했습니다**(같은 실험에서 읽힘). 이 설정은 실수로 읽는 것을 줄일 뿐 악의적인 에이전트를 막지 못합니다 — 그 경우는 Docker 샌드박스와 컨테이너·VM 또는 별도 OS 사용자가 필요합니다(docs/HOST_HARDENING.md)."
         if measured
         else "   이 OS 의 규칙 표기는 확인하지 못했습니다(Windows 에서만 측정). Claude Code 의 규칙 문법으로 키 폴더 읽기를 거부하는지 직접 확인하세요."
     )
