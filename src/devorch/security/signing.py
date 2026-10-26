@@ -74,3 +74,12 @@ def verify(payload: str, signature: str) -> bool:
     except SigningError:
         return False
     return hmac.compare_digest(expected, signature)
+
+
+def host_deny_rule() -> tuple[str, bool]:
+    """The Claude Code `permissions.deny` rule that keeps the agent's own Read/Bash/PowerShell from reading the key folder, and whether that
+    rule *form* was measured (docs/HOST_HARDENING.md: Windows absolute path form, Claude Code 2.1.310). Other OSes get the documented form, unmeasured."""
+    folder = key_path().parent.resolve().as_posix()
+    if os.name == "nt":
+        return f"Read({folder}/**)", True
+    return f"Read(/{folder}/**)", False  # leading // = absolute path from the filesystem root in Claude Code's rule syntax

@@ -30,6 +30,7 @@ from devorch.providers.mock import MockProvider
 from devorch.service import ControlPlane, ControlPlaneError
 from devorch.git.manager import GitError
 from devorch.security import policy_guard
+from devorch.security.signing import host_deny_rule
 from devorch.store import Approval, StoreError
 
 app = DevorchTyper(help="DevOrch — AI Development Control Plane", no_args_is_help=True, add_completion=False)
@@ -204,6 +205,15 @@ def quickstart(
     typer.echo("\n5) 에이전트에게 이렇게 말해 보세요:")
     typer.echo("   devorch 로 진행해줘: <바꾸고 싶은 작업 한 줄>")
     typer.echo("   → 에이전트가 분석→수정→리뷰→테스트까지 하고, 승인이 필요하면 멈춰서 사람이 실행할 명령을 알려 줍니다(그대로 터미널에 붙여넣으세요).")
+    rule, measured = host_deny_rule()
+    typer.echo("\n6) (선택, 권장) 에이전트 자신이 서명 키를 읽지 못하게 하기 — Claude Code 설정(.claude/settings.local.json 또는 사용자 설정)에 추가:")
+    typer.echo(f'   {{"permissions": {{"deny": ["{rule}"]}}}}')
+    typer.echo(
+        "   Claude Code 2.1.310 에서 Read 도구·Bash cat·PowerShell Get-Content 의 직접 읽기가 막히는 것을 확인했습니다(Windows). "
+        "파이썬 등 다른 프로그램으로 읽는 우회는 확인하지 못했고, 테스트 코드는 Docker 샌드박스가 필요합니다(docs/HOST_HARDENING.md)."
+        if measured
+        else "   이 OS 의 규칙 표기는 확인하지 못했습니다(Windows 에서만 측정). Claude Code 의 규칙 문법으로 키 폴더 읽기를 거부하는지 직접 확인하세요."
+    )
     if not mock:
         typer.echo("\n실제 리뷰어를 쓰려면 API 키를 환경변수로만 넣으세요(PowerShell: 키를 복사한 뒤 $env:OPENAI_API_KEY = (Get-Clipboard -Raw).Trim()). 키를 파일이나 채팅에 쓰지 마세요.")
 

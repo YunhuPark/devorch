@@ -123,3 +123,17 @@ def test_the_real_registration_command_has_no_mock_flag(repo, monkeypatch):
     out = run(repo).output
     line = next(l for l in out.splitlines() if "claude mcp add" in l)
     assert "--mock" not in line and "API 키" in out
+
+
+def test_quickstart_prints_the_deny_rule_for_the_real_key_folder_and_says_what_was_measured(repo, tmp_path, monkeypatch):
+    monkeypatch.setenv("DEVORCH_KEY_FILE", str(tmp_path / "keys" / "state.key"))
+    out = run(repo, "--mock", input="y\n").output
+    rule, measured = cli_main.host_deny_rule()
+    assert rule.startswith("Read(") and rule.endswith("/keys/**)") and "\\" not in rule
+    assert rule in out and "6)" in out
+    if sys.platform == "win32":  # the form that was actually measured with Claude Code: drive letter path, forward slashes
+        assert measured and rule.startswith("Read(") and rule[6:8] == ":/"
+    else:
+        assert not measured and rule.startswith("Read(//")
+    # the claim of "verified" is made only where it was measured (Windows) and never hides what was not checked
+    assert ("직접 읽기가 막히는 것을 확인" in out and "우회는 확인하지 못했고" in out) if measured else ("확인하지 못했습니다" in out)
