@@ -54,7 +54,7 @@ def review_one(project: str, commit: str, level: str, mock: bool, python: str, t
     if mock:
         cmd.append("--mock")
     t0 = time.time()
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"})
     data = parse_json(proc.stdout or "")
     row: dict = {"commit": commit, "seconds": round(time.time() - t0, 1), "exit_code": proc.returncode}
     if not data or "preview" not in data:

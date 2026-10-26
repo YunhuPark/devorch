@@ -100,3 +100,23 @@ def test_a_review_where_a_required_reviewer_never_answered_is_a_failure_not_a_no
     assert r["failed"] and r["missing_reviews"] == ["security", "architecture"] and "AuthenticationError 401" in r["detail"]
     assert "sk-proj" not in json.dumps(r)
     assert batch.summarize([r])["failed"] == 1
+
+
+def test_the_child_process_is_forced_to_utf8_so_korean_finding_titles_are_not_mangled_on_a_cp949_console(monkeypatch):
+    import json
+    import subprocess
+
+    seen = {}
+
+    class Proc:
+        returncode = 0
+        stdout = json.dumps({"status": "READY", "preview": {"files": []}, "notes": []})
+        stderr = ""
+
+    def fake_run(cmd, **kw):
+        seen["env"] = kw["env"]
+        return Proc()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    batch.review_one("p", "abc", "high", False, "python", "t")
+    assert seen["env"]["PYTHONUTF8"] == "1" and seen["env"]["PYTHONIOENCODING"] == "utf-8"
