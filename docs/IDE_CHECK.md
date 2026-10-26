@@ -45,7 +45,7 @@ CLAUDE.md 의 devorch 규칙대로 진행해줘: 결제 금액 합계를 구하�
 cd C:\Users\qkrdb\Documents\devorch-playground
 & "C:\Users\qkrdb\Documents\devorch\.venv\Scripts\python.exe" -m devorch approve <task_id> --diff
 ```
-기대: 작업·위험도·diff·리뷰·테스트 결과와 함께 **샌드박스 경고(※)** 가 보이고 `승인할까요?` 를 묻습니다 → `y`.
+기대: 작업·위험도·diff·리뷰·테스트 결과와 함께 **샌드박스 경고(※)** 가 보이고, `Diff <해시>` 줄과 함께 "승인하려면 위 diff 해시의 앞 6자 `xxxxxx` 를 그대로 입력하세요" 라고 묻습니다 → 그 6자를 입력(`y`·빈 Enter 는 아무것도 기록하지 않음, `n` 은 거부로 기록).
 명령은 **에이전트가 알려 준 것을 그대로** 붙여 넣으세요(PowerShell 기준 `& "<python>" -m devorch approve <task_id> -p "<프로젝트 폴더>"` 형태이고, cmd.exe 에서는 맨 앞의 `& ` 를 뺍니다).
 (task_id 를 모르면 `... -m devorch tasks` 로 목록을 봅니다.)
 

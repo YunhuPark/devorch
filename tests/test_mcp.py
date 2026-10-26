@@ -334,7 +334,8 @@ async def test_cli_approve_refuses_non_interactive_use(repo):
 async def test_cli_approve_records_decision_for_current_diff(repo, monkeypatch):
     monkeypatch.setattr(cli_main, "_is_interactive", lambda: True)
     plane, tid = await reviewed_and_tested_high_task(repo)
-    r = runner.invoke(cli_main.app, ["approve", tid, "-p", str(repo), "--diff"], input="y\n")
+    prefix = plane.store.load(tid).diff_sha[:6]
+    r = runner.invoke(cli_main.app, ["approve", tid, "-p", str(repo), "--diff"], input=f"{prefix}\n")
     assert r.exit_code == 0 and "승인됨" in r.output and "return a + b" in r.output
     ap = plane.store.load_approval(tid)
     assert ap.approved and ap.via == "cli" and ap.diff_sha == plane.store.load(tid).diff_sha
@@ -405,3 +406,21 @@ async def test_mcp_end_to_end_over_the_protocol(repo):
         assert (await c.call_tool("devorch_run_tests", {"task_id": tid})).structured_content["status"] == "passed"
         done = (await c.call_tool("devorch_apply_changes", {"task_id": tid})).structured_content
         assert done["status"] == "committed" and done["branch"] in branches(repo)
+
+
+@pytest.mark.parametrize("answer", ["y", "yes", "", "wrong1", "ABCDEF"])
+async def test_cli_approve_needs_the_diff_hash_so_a_reflexive_y_or_enter_records_nothing(repo, monkeypatch, answer):
+    monkeypatch.setattr(cli_main, "_is_interactive", lambda: True)
+    plane, tid = await reviewed_and_tested_high_task(repo)
+    r = runner.invoke(cli_main.app, ["approve", tid, "-p", str(repo)], input=f"{answer}\n")
+    assert r.exit_code == 1 and "아무것도 기록하지 않았습니다" in r.output
+    assert plane.store.load_approval(tid) is None and not plane.store._path(tid, ".approval.json").exists()
+    assert (await plane.apply_changes(tid))["status"] == "approval_required"
+
+
+async def test_cli_approve_prompt_shows_the_exact_hash_prefix_to_type(repo, monkeypatch):
+    monkeypatch.setattr(cli_main, "_is_interactive", lambda: True)
+    plane, tid = await reviewed_and_tested_high_task(repo)
+    sha = plane.store.load(tid).diff_sha
+    r = runner.invoke(cli_main.app, ["approve", tid, "-p", str(repo)], input="\n")
+    assert f"`{sha[:6]}`" in r.output and f"Diff {sha}" in r.output

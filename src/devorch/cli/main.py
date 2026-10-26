@@ -33,6 +33,8 @@ from devorch.security import policy_guard
 from devorch.security.signing import host_deny_rule
 from devorch.store import Approval, StoreError
 
+APPROVE_CONFIRM_CHARS = 6  # how much of the diff hash the human types to approve (see `approve`)
+
 app = DevorchTyper(help="DevOrch — AI Development Control Plane", no_args_is_help=True, add_completion=False)
 
 from devorch.cli.bench_cmd import bench_app  # noqa: E402
@@ -741,7 +743,22 @@ def approve(
     if show_diff:
         typer.echo("\n" + record.diff)
 
-    approved = typer.confirm("이 diff를 승인할까요? (n = 거부로 기록)")
+    # Typing the diff's hash prefix (not "y") ties the decision to THIS diff and makes a reflexive Enter/y harmless: you have to read the line above.
+    prefix = (record.diff_sha or "")[:APPROVE_CONFIRM_CHARS]
+    if len(prefix) < APPROVE_CONFIRM_CHARS:
+        typer.echo("이 작업에는 diff 해시가 없어 승인할 수 없습니다. analyze_task 로 새로 시작하세요.", err=True)
+        raise typer.Exit(1)
+    answer = typer.prompt(
+        f"승인하려면 위 diff 해시의 앞 {APPROVE_CONFIRM_CHARS}자 `{prefix}` 를 그대로 입력하세요 (거부로 기록하려면 n, 아무것도 기록하지 않으려면 그냥 Enter)",
+        default="", show_default=False,
+    ).strip()
+    if answer.lower() == "n":
+        approved = False
+    elif answer == prefix:
+        approved = True
+    else:
+        typer.echo("입력이 해시와 다르거나 비어 있어 아무것도 기록하지 않았습니다.")
+        raise typer.Exit(1)
     plane.store.save_approval(Approval(task_id=task_id, diff_sha=record.diff_sha or "", approved=approved, via="cli"))
     plane.audit.log(task_id, "approval", {"approved": approved, "diff_sha": record.diff_sha, "via": "cli"})
     typer.echo("승인됨. 에이전트가 devorch_apply_changes 를 호출하면 브랜치에 커밋됩니다." if approved else "거부로 기록했습니다.")
