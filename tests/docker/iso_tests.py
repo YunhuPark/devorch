@@ -1,5 +1,6 @@
 """Runs INSIDE the DevOrch Docker sandbox. Each test asserts that something a hostile test could try is impossible."""
 import os
+import errno
 import pathlib
 import socket
 import subprocess
@@ -57,11 +58,19 @@ def test_cannot_write_outside_work_and_tmp():
 
 def test_tmp_is_writable_and_small():
     pathlib.Path("/tmp/ok.txt").write_text("ok")
+    chunk = b"0" * (1024 * 1024)
     try:
         with open("/tmp/big.bin", "wb") as fh:
-            fh.write(b"0" * (300 * 1024 * 1024))  # the tmpfs is 256m
-    except OSError:
+            # Keep process memory bounded while filling the 256 MiB tmpfs.
+            # A single 300 MiB allocation plus tmpfs pages exceeds the separate
+            # 512 MiB container memory limit before ENOSPC can be observed.
+            for _ in range(300):
+                fh.write(chunk)
+    except OSError as error:
+        assert error.errno == errno.ENOSPC
         return
+    finally:
+        pathlib.Path("/tmp/big.bin").unlink(missing_ok=True)
     raise AssertionError("wrote 300 MB into /tmp: the size limit is not enforced")
 
 
