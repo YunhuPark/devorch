@@ -213,6 +213,9 @@ MCP elicitation은 에이전트가 자동 응답할 수 있어 승인 수단으�
 
 `.env`, `*.pem`, `*.key`, `id_rsa*`, `.devorch/`는 diff 수집에서 제외되고, credential 형태의 문자열이 diff에 있으면
 리뷰 자체를 거부합니다. 바이너리·심볼릭 링크·`..`/절대 경로·`.git/` 변경도 거부합니다. diff는 200KB 한도입니다.
+'credential 형태'로 보는 것: OpenAI/Anthropic `sk-`, Google `AIza`, GitHub `ghp_` 등·`github_pat_`, AWS `AKIA`, `Bearer …`, PEM 개인키,
+Slack `xox?-`, Stripe 운영 키 `sk_live_`·`rk_live_`. JWT와 URL 속 비밀번호(`postgres://user:비밀번호@host`)는 화면·로그에서 가리기만 하고
+리뷰를 막지는 않습니다(예시·테스트 코드에 흔해서). **목록에 없는 형식(사내 토큰, 임의의 문자열 비밀번호 등)은 걸리지 않습니다** — 완전한 비밀값 탐지기가 아닙니다.
 리뷰는 작업당 최대 `limits.max_retries + 1`회이며, 동일 diff의 재요청은 캐시되어 비용이 들지 않습니다.
 
 ## Benchmark — 리뷰어가 심어둔 결함을 찾는가
@@ -249,7 +252,7 @@ devorch bench run --mode both --repeats 3        # 실제 LLM: 호출 횟수 확
 
 ```yaml
 project:
-  sandbox: {mode: docker, image: <테스트 의존성이 이미 들어 있는 이미지>}   # network: none(기본)|bridge, memory, cpus, pids
+  sandbox: {mode: docker, image: <테스트 의존성이 이미 들어 있는 이미지>}   # network: none(기본)|bridge, memory, cpus, pids, user("uid:gid", root 금지 — DevOrch 를 root 로 돌릴 때 필요)
 ```
 
 `devorch sandbox` 로 docker/daemon/이미지 상태를 점검합니다(이미지 안의 코드는 실행하지 않음).

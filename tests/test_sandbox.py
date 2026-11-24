@@ -51,6 +51,9 @@ def shim(tmp_path, monkeypatch):
     log = tmp_path / "docker.log"
     monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("SHIM_LOG", str(log))
+    # These tests are about how the docker CLI is driven, not about who runs it: pin a non-root host user so a root host (refused by design,
+    # tests/test_sandbox_user.py) gives the same results as everywhere else.
+    monkeypatch.setattr("devorch.core.execution.sandbox.host_uid_gid", lambda: (1000, 1000))
     if sys.platform == "win32":
         # CreateProcess can't run an extension-less script: route only the "docker" executable to the shim.
         real_exec, real_which = asyncio.create_subprocess_exec, shutil.which
@@ -166,6 +169,7 @@ async def test_a_refused_docker_launch_is_a_failed_result_after_retries(tmp_path
     from devorch.core.execution import sandbox as sb
 
     monkeypatch.setattr(sb.shutil, "which", lambda name: "docker")
+    monkeypatch.setattr(sb, "host_uid_gid", lambda: (1000, 1000))  # about launching docker, not about who runs it
     calls = []
 
     async def refuse(*args, **kwargs):
@@ -184,6 +188,7 @@ async def test_one_refused_docker_launch_is_retried_and_then_works(tmp_path, mon
     from devorch.core.execution import sandbox as sb
 
     monkeypatch.setattr(sb.shutil, "which", lambda name: "docker")
+    monkeypatch.setattr(sb, "host_uid_gid", lambda: (1000, 1000))  # about launching docker, not about who runs it
     real = asyncio.create_subprocess_exec
     state = {"n": 0}
 

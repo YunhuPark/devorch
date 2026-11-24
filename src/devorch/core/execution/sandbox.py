@@ -5,7 +5,9 @@ never silently run on the host instead.
 
 What the container gets: the throwaway worktree at /work (read-write), no network by default,
 no environment variables from the host, all capabilities dropped, no-new-privileges, non-root
-uid/gid, memory/cpu/pids limits, a tmpfs /tmp. What it does NOT get: the main repo's .git,
+uid/gid, memory/cpu/pids limits, a tmpfs /tmp. Never root: the container runs as the host user's uid, and when that is root (uid 0) the tests
+are refused unless ``project.sandbox.user`` names a non-root ``uid:gid`` — root inside the container could write outside /work and /tmp
+(reproduced 2026-11-24 on Linux as root: 2 of the 10 isolation checks failed). What it does NOT get: the main repo's .git,
 the user's home, or any other host path.
 
 Not covered: kernel/Docker escapes (a container is not a VM), and with ``network: bridge`` the
@@ -34,6 +36,19 @@ class SandboxConfig(BaseModel):
     memory: str = "1g"
     cpus: str = "2"
     pids: int = 256
+    user: str | None = None  # "uid:gid" to run as instead of the host user's; never 0 — needed when DevOrch itself runs as root
+
+    @field_validator("user")
+    @classmethod
+    def _user(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        parts = str(v).strip().split(":")
+        if len(parts) != 2 or not all(x.isdigit() for x in parts):
+            raise ValueError('sandbox.user 는 "uid:gid" 숫자 형식이어야 합니다(예: "1000:1000")')
+        if int(parts[0]) == 0 or int(parts[1]) == 0:
+            raise ValueError("sandbox.user 에 root(0)는 쓸 수 없습니다 — 컨테이너 안에서 root 면 /work·/tmp 밖에도 쓸 수 있습니다")
+        return f"{int(parts[0])}:{int(parts[1])}"
 
     @field_validator("mode")
     @classmethod
@@ -62,16 +77,39 @@ FALLBACK_UID_GID = (1000, 1000)
 LAUNCH_RETRIES = 3
 
 
-def container_user() -> tuple[int, int]:
-    """uid:gid the container runs as — the host user's where the OS has one, never root.
+ROOT_REFUSED = (
+    "DevOrch 가 root(uid 0)로 실행 중이라 Docker 샌드박스도 root 로 테스트를 돌리게 됩니다 — 컨테이너 안에서 /work·/tmp 밖에 쓸 수 있어 "
+    "격리가 약해지므로 실행하지 않았습니다(호스트 실행으로 대체하지 않음). 일반 사용자로 DevOrch 를 실행하거나, config.yaml 의 "
+    'project.sandbox.user 에 root 가 아닌 "uid:gid"(예: "1000:1000")를 정하세요 — 그 uid 가 작업 폴더를 읽고 쓸 수 있어야 합니다.'
+)
 
-    Windows has no uid/gid, so a fixed unprivileged id is used. Verified 2026-10-15 on Docker Desktop for Windows (WSL2 backend): that id
-    reads files created on the host and writes files that appear on the host (tests/test_docker_sandbox.py). Other setups (Docker on macOS,
-    rootless Docker, network drives) have not been tried.
-    """
+
+def host_uid_gid() -> tuple[int, int] | None:
+    """The host user's uid/gid, or None where the OS has none (Windows)."""
     if hasattr(os, "getuid") and hasattr(os, "getgid"):
         return os.getuid(), os.getgid()
-    return FALLBACK_UID_GID
+    return None
+
+
+def container_user(cfg: SandboxConfig | None = None) -> tuple[int, int] | str:
+    """uid:gid the container runs as — never root. Returns the refusal message instead when the only choice would be root.
+
+    Order: ``project.sandbox.user`` if set (validated non-zero) → the host user's uid/gid → on Windows (no uid/gid) a fixed unprivileged id.
+    The host user's id keeps files written in /work owned by that user. When the host user is root that id would make the container root,
+    so it is refused rather than silently swapped: a substitute id usually cannot write the root-owned worktree, which would fail the tests
+    in a confusing way. Verified 2026-10-15 on Docker Desktop for Windows (WSL2 backend): the fallback id reads files created on the host and
+    writes files that appear on the host (tests/test_docker_sandbox.py). Other setups (Docker on macOS, rootless Docker, network drives) have not
+    been tried. Rootless Docker maps container root to the host user, but that is not detected here — use ``user`` there too.
+    """
+    if cfg is not None and cfg.user:
+        uid, gid = (int(x) for x in cfg.user.split(":"))
+        return uid, gid
+    host = host_uid_gid()
+    if host is None:
+        return FALLBACK_UID_GID
+    if host[0] == 0:
+        return ROOT_REFUSED
+    return host
 
 
 def build_docker_args(cfg: SandboxConfig, name: str, cwd: Path, command: str, uid: int, gid: int, env: dict[str, str] | None = None) -> list[str]:
@@ -113,6 +151,8 @@ async def sandbox_status(cfg: SandboxConfig) -> list[tuple[str, bool, str]]:
     checks.append(("docker daemon", code == 0, out.splitlines()[-1] if out else ""))
     if code != 0:
         return checks
+    user = container_user(cfg)
+    checks.append(("컨테이너 사용자", not isinstance(user, str), user if isinstance(user, str) else f"{user[0]}:{user[1]} (root 아님)"))
     if not cfg.image:
         checks.append(("image 설정", False, "config.yaml 의 project.sandbox.image 가 필요함"))
     else:
@@ -132,8 +172,11 @@ async def run_tests_docker(
     if not shutil.which("docker"):
         return TestResult(False, command, None, "", "sandbox.mode=docker 인데 docker 를 찾을 수 없음 (호스트 실행으로 대체하지 않음)")
 
+    user = container_user(cfg)
+    if isinstance(user, str):
+        return TestResult(False, command, None, "", f"[docker] {user}")
+    uid, gid = user
     name = f"devorch-{uuid.uuid4().hex[:12]}"
-    uid, gid = container_user()
     args = build_docker_args(cfg, name, cwd, command, uid, gid, env)
     proc = None
     for attempt in range(LAUNCH_RETRIES):

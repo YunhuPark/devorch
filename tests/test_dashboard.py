@@ -5,7 +5,7 @@ import threading
 import pytest
 
 from devorch.dashboard.server import make_server
-from tests.test_mcp import HIGH_TASK, LOW_TASK, SEC_FINDING, edit, make_plane, repo  # noqa: F401
+from test_mcp import HIGH_TASK, LOW_TASK, SEC_FINDING, edit, make_plane, repo  # noqa: F401
 
 
 @pytest.fixture

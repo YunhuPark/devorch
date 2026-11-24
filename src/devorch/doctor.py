@@ -14,7 +14,7 @@ import yaml
 
 from devorch.config import LEVELS, ConfigError, devorch_dir, load_config, load_policy, load_test_env
 from devorch.core.analyzer.diff_reassess import path_matches
-from devorch.core.execution.sandbox import load_sandbox
+from devorch.core.execution.sandbox import container_user, load_sandbox
 from devorch.core.execution.test_runner import detect_test_command, resolve_executable
 from devorch.git.manager import GitError, GitManager
 from devorch.security import policy_guard
@@ -207,7 +207,10 @@ def run_checks(root: Path, env: Mapping[str, str] | None = None) -> list[Check]:
     elif not sb.image:
         out.append(Check("샌드박스", "fail", "mode=docker 인데 image 가 없음", "project.sandbox.image 를 정하세요(테스트 의존성이 든 이미지)."))
     else:
-        out.append(Check("샌드박스", "ok", f"docker image={sb.image} (daemon 상태는 `devorch sandbox` 로 확인)"))
+        if isinstance(user := container_user(sb), str):
+            out.append(Check("샌드박스", "fail", "mode=docker 인데 DevOrch 가 root 로 실행 중 — 테스트가 컨테이너 안에서도 root 로 돌게 되어 실행이 거부됩니다", 'DevOrch 를 일반 사용자로 실행하거나 config.yaml 의 project.sandbox.user 에 root 가 아닌 "uid:gid"(예: "1000:1000")를 정하세요.'))
+        else:
+            out.append(Check("샌드박스", "ok", f"docker image={sb.image}, 사용자 {user[0]}:{user[1]} (daemon 상태는 `devorch sandbox` 로 확인)"))
 
     launcher = "devorch" if shutil.which("devorch") else f'"{sys.executable}" -m devorch'
     out.append(Check("MCP 등록", "info", f'claude mcp add devorch -- {launcher} mcp -p "{root}"', "연결 시험만 하려면 끝에 --mock 을 붙이세요. `devorch` 명령이 안 되면 `python -m devorch` 로 실행합니다."))
