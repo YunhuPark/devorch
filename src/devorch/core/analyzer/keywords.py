@@ -1,8 +1,11 @@
 """Keyword tables shared by the analyzers.
 
 ASCII keywords match at a word start (so "login" matches "logins" but "ui" does
-not match "build"). Entries starting with ``re:`` are raw regular expressions.
-Non-ASCII (Korean) keywords match as substrings.
+not match "build"). Entries starting with ``re:`` are raw regular expressions, matched
+with ASCII word boundaries: Korean letters count as a boundary, so ``\bdb\b`` matches
+"DB에서" and "주문DB" (a Korean particle or noun touching an English token). Without
+re.ASCII, Python's ``\b`` treats Hangul as word characters and "DB에서" was missed while
+"DB 에서" matched. Non-ASCII (Korean) keywords match as substrings.
 """
 
 from __future__ import annotations
@@ -86,7 +89,7 @@ def matches(text: str, keyword: str) -> bool:
     """Case-insensitive keyword match following the rules in the module docstring."""
     text = text.lower()
     if keyword.startswith("re:"):
-        return re.search(keyword[3:], text) is not None
+        return re.search(keyword[3:], text, re.ASCII) is not None  # Hangul next to an English token is a boundary
     if keyword.isascii():
         return re.search(r"(?<![a-z0-9])" + re.escape(keyword.lower()), text) is not None
     return keyword in text

@@ -14,7 +14,16 @@ _PATTERNS = [
     re.compile(r"AKIA[0-9A-Z]{16}"),                       # AWS access key id
     re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]{16,}"),
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S),
+    re.compile(r"github_pat_[A-Za-z0-9_]{22,}"),            # GitHub fine-grained tokens
+    re.compile(r"xox[abposr]-[A-Za-z0-9\-]{10,}"),          # Slack tokens (bot, user, app, ...)
+    re.compile(r"[sr]k_live_[A-Za-z0-9]{16,}"),             # Stripe live secret / restricted keys (test keys are left alone)
 ]
+# Redacted wherever text is shown or logged, but NOT a reason to refuse a diff: these shapes are common in ordinary code and fixtures
+# (example JWTs in tests, ``postgres://postgres:postgres@localhost`` in compose files), so blocking on them would stop legitimate work.
+_REDACT_ONLY = [
+    re.compile(r"\beyJ[A-Za-z0-9_\-]{8,}\.eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}"),  # JWT (header.payload.signature)
+]
+_URL_PASSWORD = re.compile(r"(\b[a-z][a-z0-9+.\-]*://[^\s:/@'\"]+:)[^\s@/'\"]+(@)")  # postgres://user:<this>@host — only the password
 _ASSIGNMENT = re.compile(
     r"(?i)\b(api[_-]?key|secret|token|password|passwd|authorization)\b(\s*[:=]\s*)(['\"]?)[^\s'\",;]+"
 )
@@ -29,6 +38,9 @@ def has_secret_literal(text: str) -> bool:
 def redact(text: str) -> str:
     for pat in _PATTERNS:
         text = pat.sub(REDACTED, text)
+    for pat in _REDACT_ONLY:
+        text = pat.sub(REDACTED, text)
+    text = _URL_PASSWORD.sub(lambda m: m.group(1) + REDACTED + m.group(2), text)
     return _ASSIGNMENT.sub(lambda m: f"{m.group(1)}{m.group(2)}{m.group(3)}{REDACTED}", text)
 
 
