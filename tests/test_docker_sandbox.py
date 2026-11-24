@@ -43,6 +43,9 @@ def _docker_ready() -> bool:
 # DEVORCH_REQUIRE_DOCKER=1 (set by CI) turns a missing Docker into failures instead of a silent skip
 pytestmark = pytest.mark.skipif(not _docker_ready() and not os.environ.get("DEVORCH_REQUIRE_DOCKER"), reason=f"needs a running Docker daemon and the image {IMAGE} (docker build -t {IMAGE} tests/docker)")
 CFG = SandboxConfig(mode="docker", image=IMAGE, network="none", memory="512m", cpus="2", pids=64)
+# These run the container as the HOST user's uid; on a root host that is refused by design (tests/test_sandbox_user.py), so they skip there
+# with this reason instead of failing — the configured-user test below still runs on a root host. CI runs as a normal user.
+host_user = pytest.mark.skipif(hasattr(os, "getuid") and os.getuid() == 0, reason="runs the container as the host user; refused when that is root — set project.sandbox.user (see test_a_configured_user_...)")
 
 
 def workdir(tmp_path, files=None, isolation=True):
@@ -56,6 +59,7 @@ def workdir(tmp_path, files=None, isolation=True):
     return d
 
 
+@host_user
 async def test_a_hostile_test_finds_nothing_to_attack_inside_the_container(tmp_path, monkeypatch):
     """10 checks run INSIDE the container: non-root, no network/DNS, host env and paths invisible, signing key unreachable, no writes outside /work and /tmp."""
     monkeypatch.setenv("DEVORCH_PROBE_SECRET", "must-not-leak")  # in the HOST process; the container must not see it
@@ -64,6 +68,7 @@ async def test_a_hostile_test_finds_nothing_to_attack_inside_the_container(tmp_p
     assert "10 passed" in r.output_tail
 
 
+@host_user
 async def test_the_container_can_read_and_write_the_bind_mounted_directory(tmp_path):
     body = "import pathlib\n\ndef test_rw():\n    assert pathlib.Path('calc.py').exists()\n    pathlib.Path('out.txt').write_text('from-container')\n"
     d = workdir(tmp_path, {"test_rw.py": body}, isolation=False)
@@ -72,6 +77,16 @@ async def test_the_container_can_read_and_write_the_bind_mounted_directory(tmp_p
     assert (d / "out.txt").read_text(encoding="utf-8") == "from-container"  # the user id the container runs as can write to the host directory
 
 
+async def test_a_configured_user_is_who_the_container_runs_as_and_the_isolation_checks_still_pass(tmp_path):
+    """project.sandbox.user — the way out when DevOrch runs as root — really sets the container's uid:gid (works whatever the host user is)."""
+    d = workdir(tmp_path, {"test_who.py": "import os\n\ndef test_who():\n    assert (os.getuid(), os.getgid()) == (4242, 4243)\n"})
+    cfg = CFG.model_copy(update={"user": "4242:4243"})
+    r = await run_tests_docker(CMD, d, ALLOWED, 120, cfg)
+    assert r.ok, r.output_tail
+    assert "11 passed" in r.output_tail  # the 10 isolation checks + test_who
+
+
+@host_user
 async def test_memory_limit_kills_a_test_that_allocates_too_much(tmp_path):
     # b"x" * n WRITES every page; bytearray(n) would only reserve lazily-zeroed memory that never counts against the limit (it did not on Linux)
     d = workdir(tmp_path, {"test_mem.py": "def test_mem():\n    x = b'x' * (2 * 1024 * 1024 * 1024)\n    assert x\n"}, isolation=False)
@@ -79,6 +94,7 @@ async def test_memory_limit_kills_a_test_that_allocates_too_much(tmp_path):
     assert not r.ok and r.exit_code == 137  # killed by the OOM killer
 
 
+@host_user
 async def test_pids_limit_refuses_a_fork_bomb(tmp_path):
     body = (
         "import subprocess\n\n"
@@ -99,6 +115,7 @@ async def test_pids_limit_refuses_a_fork_bomb(tmp_path):
     assert r.ok, r.output_tail
 
 
+@host_user
 async def test_a_timed_out_test_leaves_no_container_behind(tmp_path):
     d = workdir(tmp_path, {"test_slow.py": "import time\n\ndef test_slow():\n    time.sleep(60)\n"}, isolation=False)
     r = await run_tests_docker(CMD + " test_slow.py", d, ALLOWED, 8, CFG)
@@ -107,6 +124,7 @@ async def test_a_timed_out_test_leaves_no_container_behind(tmp_path):
     assert left == []
 
 
+@host_user
 async def test_a_missing_image_fails_the_tests_instead_of_running_them_on_the_host(tmp_path):
     bad = SandboxConfig(mode="docker", image="devorch-no-such-image:0", network="none")
     r = await run_tests_docker(CMD, workdir(tmp_path), ALLOWED, 60, bad)
@@ -152,6 +170,7 @@ def docker_plane(repo):
     return ControlPlane(repo, pol, {}, reg, Executor(repo, pol, test_command="python -m pytest -q", sandbox=CFG))
 
 
+@host_user
 async def test_a_hostile_test_cannot_forge_the_human_approval_in_the_docker_sandbox(repo):
     """The same test run with sandbox mode 'none' reads the signing key and approves its own change (reproduced 2026-10-15) — Docker is what stops it."""
     plane = docker_plane(repo)
@@ -164,6 +183,7 @@ async def test_a_hostile_test_cannot_forge_the_human_approval_in_the_docker_sand
     assert (await plane.apply_changes(a["task_id"]))["status"] == "approval_required"
 
 
+@host_user
 async def test_the_whole_flow_commits_exactly_the_reviewed_files_when_tests_run_in_docker(repo):
     plane = docker_plane(repo)
     a = plane.analyze_task(PAYMENT)

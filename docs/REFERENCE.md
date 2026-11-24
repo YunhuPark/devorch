@@ -249,7 +249,7 @@ devorch bench run --mode both --repeats 3        # 실제 LLM: 호출 횟수 확
 
 ```yaml
 project:
-  sandbox: {mode: docker, image: <테스트 의존성이 이미 들어 있는 이미지>}   # network: none(기본)|bridge, memory, cpus, pids
+  sandbox: {mode: docker, image: <테스트 의존성이 이미 들어 있는 이미지>}   # network: none(기본)|bridge, memory, cpus, pids, user("uid:gid", root 금지 — DevOrch 를 root 로 돌릴 때 필요)
 ```
 
 `devorch sandbox` 로 docker/daemon/이미지 상태를 점검합니다(이미지 안의 코드는 실행하지 않음).
