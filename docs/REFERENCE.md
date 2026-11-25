@@ -255,6 +255,13 @@ project:
   sandbox: {mode: docker, image: <테스트 의존성이 이미 들어 있는 이미지>}   # network: none(기본)|bridge, memory, cpus, pids, user("uid:gid", root 금지 — DevOrch 를 root 로 돌릴 때 필요)
 ```
 
+Docker를 쓸 수 없다면 `.devorch/policy.yaml` 에서 아래를 켜 두는 편이 안전합니다. 샌드박스가 없을 때 사람 승인이 필요한 변경의 테스트를 실행 전에 거부합니다(승인이 필요 없는 변경은 그대로 동작).
+
+```yaml
+approval:
+  require_sandbox_for_approval: true   # 기본 false. Docker 없이 돌릴 때 승인 우회를 막는 대신, 승인 대상 변경은 테스트를 못 하므로 반영도 못 함
+```
+
 `devorch sandbox` 로 docker/daemon/이미지 상태를 점검합니다(이미지 안의 코드는 실행하지 않음).
 컨테이너에는 임시 worktree만 `/work`로 마운트되고, 네트워크 없음·호스트 환경변수 없음·모든 capability 제거·
 `no-new-privileges`·비root·메모리/CPU/pid 제한이 적용됩니다. 타임아웃 시 컨테이너를 `docker rm -f`로 정리합니다.
