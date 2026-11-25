@@ -2,6 +2,8 @@
 __pycache__/
 *.egg-info/
 .pytest_cache/
+build/
+dist/
 .devorch/audit.jsonl
 
 # secrets and local state — never commit
