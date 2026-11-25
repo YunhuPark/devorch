@@ -1,13 +1,21 @@
 .venv/
+venv/
 __pycache__/
 *.egg-info/
 .pytest_cache/
+build/
+dist/
 .devorch/audit.jsonl
 
 # secrets and local state — never commit
+.env
+.env.*
+!.env.example
 *.env
-.env*
 keys.env
+cookies.txt
+token*.json
+credentials*.json
 .devorch/
 *.pem
 *.key

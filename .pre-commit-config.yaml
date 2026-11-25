@@ -1,0 +1,7 @@
+# Commit-time secret scan (재발 방지). 설치: pip install pre-commit && pre-commit install
+# 수동 전체 검사: pre-commit run gitleaks --all-files
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
